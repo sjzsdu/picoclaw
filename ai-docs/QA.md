@@ -1208,3 +1208,168 @@ If there is nothing that requires attention, respond ONLY with: HEARTBEAT_OK
 | **静默响应** | 无需操作时返回 `HEARTBEAT_OK` 不打扰用户 |
 | **异步任务** | 复杂任务使用 spawn 创建子代理后台执行 |
 | **最后渠道** | 响应发送到用户最后活跃的渠道 |
+
+---
+
+## 八、飞书/Lark 通道支持
+
+### Q: 当前支持 Lark 这个 channel 吗？Lark 的 channel 和 Feishu 是不是一样的？
+
+#### A: 支持飞书通道，Lark 和 Feishu 是同一个产品
+
+##### 1. 飞书/Lark 支持情况
+
+**✅ 支持飞书通道（配置名：`feishu`）**
+
+```go
+// pkg/config/config.go:220-227
+type FeishuConfig struct {
+    Enabled           bool
+    AppID             string
+    AppSecret         string
+    EncryptKey        string
+    VerificationToken string
+    AllowFrom         []string
+}
+```
+
+**配置示例**：
+```json
+{
+  "channels": {
+    "feishu": {
+      "enabled": true,
+      "app_id": "cli_xxxx",
+      "app_secret": "xxxx",
+      "verification_token": "xxxx",
+      "encrypt_key": "",
+      "allow_from": []
+    }
+  }
+}
+```
+
+##### 2. Lark 和 Feishu 的关系
+
+**是的，Lark 就是飞书**
+
+- **飞书**：中国大陆版
+- **Lark**：国际版/企业版
+- 使用相同的 API 和 SDK
+
+```go
+// pkg/channels/feishu_64.go
+lark "github.com/larksuite/oapi-sdk-go/v3"
+```
+
+##### 3. 系统支持情况
+
+| 架构 | 支持情况 |
+|------|---------|
+| amd64 (x86_64) | ✅ 支持 |
+| arm64 | ✅ 支持 |
+| riscv64 | ✅ 支持 |
+| 32位 (armv7l, 386) | ❌ 不支持 |
+
+---
+
+## 九、程序员使用场景
+
+### Q: 我是个程序员，能够利用这个工具干啥事情？
+
+#### A: PicoClaw 可作为程序员的编程助手、远程终端和自动化工具
+
+##### 1. 核心使用场景
+
+| 场景 | 说明 |
+|------|------|
+| **编程助手** | 代码生成、审查、调试、解释 |
+| **远程终端** | 通过 Telegram/飞书执行服务器命令 |
+| **定时任务** | 定时执行脚本、发送报告 |
+| **API 网关** | 接收 webhook 并处理 |
+| **自动化运维** | 监控、部署、日志查询 |
+
+##### 2. 实际使用示例
+
+**编程辅助**：
+```
+用户: 帮我写一个 Go 的 HTTP 服务器
+AI: [生成代码]
+
+用户: 加上日志中间件
+AI: [添加 zerolog 中间件]
+
+用户: 帮我写个单元测试
+AI: [生成测试代码]
+```
+
+**服务器管理**：
+```
+用户: 服务器状态怎么样？
+AI: 检查 CPU、内存、磁盘...
+
+用户: 重启 docker 服务
+AI: [执行 systemctl restart docker]
+```
+
+**自动化报告**（HEARTBEAT.md 配置）：
+```markdown
+## 每日任务
+- 获取 GitHub issues 统计
+- 汇总 CI/CD 构建状态
+- 生成日报发送到群聊
+```
+
+##### 3. 开发自定义技能
+
+程序员可以开发自定义技能（Skills）来扩展功能：
+
+```yaml
+# skills/mytool/SKILL.md
+---
+name: mytool
+description: 自定义工具
+---
+
+# MyTool
+
+## 功能
+
+使用 curl 调用内部 API：
+curl -s http://internal-api/health
+```
+
+**技能目录结构**：
+```
+skills/mytool/
+├── SKILL.md        # 技能定义
+└── references/    # 参考文档
+```
+
+##### 4. 安全特性（程序员友好）
+
+| 特性 | 说明 |
+|------|------|
+| **沙盒限制** | 文件/命令操作限制在工作区，防止误操作 |
+| **危险命令拦截** | 自动阻止 rm -rf、格式化等危险操作 |
+| **白名单机制** | 可配置允许的用户ID |
+
+##### 5. 对比其他工具
+
+| 场景 | PicoClaw | ChatGPT | 其他 Bot |
+|------|---------|---------|---------|
+| 本地文件操作 | ✅ 沙盒安全 | ❌ | ⚠️ |
+| 执行命令 | ✅ | ❌ | ⚠️ |
+| 定时任务 | ✅ 心跳 | ❌ | ⚠️ |
+| 多渠道接入 | ✅ 10+ | ❌ | ⚠️ |
+| 树莓派运行 | ✅ <10MB | ❌ | ❌ |
+| 开源可控 | ✅ | ❌ | ⚠️ |
+
+##### 6. 总结
+
+作为程序员，PicoClaw 可以成为你的：
+- 🤖 **编程助手** - 代码生成、审查、调试
+- 🖥️ **远程终端** - 通过消息渠道管理服务器
+- ⏰ **定时任务调度器** - 自动化运维
+- 🔌 **API 网关** - 连接各种服务
+- 📱 **统一入口** - 一个入口管理多个服务
