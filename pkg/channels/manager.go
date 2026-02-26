@@ -207,10 +207,6 @@ func (m *Manager) initChannel(name, displayName string) {
 func (m *Manager) initChannels() error {
 	logger.InfoC("channels", "Initializing channel manager")
 
-	// Initialize audio processor for voice transcription
-	audioProcessor := m.createAudioProcessor()
-	m.injectAudioProcessor(audioProcessor)
-
 	if m.config.Channels.Telegram.Enabled && m.config.Channels.Telegram.Token != "" {
 		m.initChannel("telegram", "Telegram")
 	}
@@ -267,6 +263,10 @@ func (m *Manager) initChannels() error {
 	if m.config.Channels.Pico.Enabled && m.config.Channels.Pico.Token != "" {
 		m.initChannel("pico", "Pico")
 	}
+
+	// Initialize audio processor for voice transcription (after all channels are created)
+	audioProcessor := m.createAudioProcessor()
+	m.injectAudioProcessor(audioProcessor)
 
 	logger.InfoCF("channels", "Channel initialization completed", map[string]any{
 		"enabled_channels": len(m.channels),

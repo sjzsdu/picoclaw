@@ -10,7 +10,9 @@ import (
 	"mime/multipart"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/sipeed/picoclaw/pkg/logger"
@@ -44,10 +46,18 @@ func NewAudioProcessor(transcriber Transcriber) *AudioProcessor {
 
 // ProcessAudio transcribes an audio file and returns the text content.
 // Returns an error if the transcriber is not available or transcription fails.
+// If the audio format is not supported by the provider, it will be converted using ffmpeg.
 func (p *AudioProcessor) ProcessAudio(ctx context.Context, audioPath string) (string, error) {
 	if p.transcriber == nil || !p.transcriber.IsAvailable() {
 		return "", errors.New("transcriber not available")
 	}
+
+	// Check and convert audio format if needed
+	audioPath, cleanup, err := p.processAudioWithConversion(ctx, audioPath)
+	if err != nil {
+		return "", fmt.Errorf("audio format conversion failed: %w", err)
+	}
+	defer cleanup()
 
 	result, err := p.transcriber.Transcribe(ctx, audioPath)
 	if err != nil {
@@ -60,6 +70,117 @@ func (p *AudioProcessor) ProcessAudio(ctx context.Context, audioPath string) (st
 // IsAvailable returns true if the audio processor has a available transcriber.
 func (p *AudioProcessor) IsAvailable() bool {
 	return p.transcriber != nil && p.transcriber.IsAvailable()
+}
+
+// Supported audio formats for each provider
+var supportedFormats = map[string][]string{
+	"groq":      {".flac", ".mp3", ".mp4", ".mpeg", ".mpga", ".m4a", ".ogg", ".wav", ".webm"},
+	"alibaba":   {".wav", ".mp3", ".m4a"},
+	"openai":    {".mp3", ".mp4", ".mpeg", ".mpga", ".m4a", ".ogg", ".wav", ".webm"},
+}
+
+// isFormatSupported checks if the audio format is supported by the given provider.
+func isFormatSupported(filename, provider string) bool {
+	ext := strings.ToLower(filepath.Ext(filename))
+	formats, ok := supportedFormats[provider]
+	if !ok {
+		// Unknown provider, assume not supported
+		return false
+	}
+	for _, f := range formats {
+		if ext == f {
+			return true
+		}
+	}
+	return false
+}
+
+// convertAudio converts an audio file to MP3 format using ffmpeg.
+// Returns the path to the converted file or an error.
+// The caller is responsible for cleaning up the converted file.
+func convertAudio(ctx context.Context, inputPath string) (string, error) {
+	// Check if ffmpeg is available
+	cmd := exec.CommandContext(ctx, "ffmpeg", "-version")
+	if err := cmd.Run(); err != nil {
+		logger.ErrorCF("voice", "ffmpeg not available", map[string]any{"error": err})
+		return "", errors.New("ffmpeg not installed")
+	}
+
+	// Generate output path
+	dir := filepath.Dir(inputPath)
+	name := filepath.Base(inputPath)
+	ext := filepath.Ext(name)
+	base := strings.TrimSuffix(name, ext)
+	outputPath := filepath.Join(dir, base+"_converted.mp3")
+
+	// Run ffmpeg conversion
+	// -i: input file
+	// -y: overwrite output file if exists
+	// -vn: no video
+	// -acodec libmp3lame: use MP3 codec
+	// -q:a 2: high quality MP3
+	cmd = exec.CommandContext(ctx, "ffmpeg", "-i", inputPath, "-y", "-vn", "-acodec", "libmp3lame", "-q:a", "2", outputPath)
+
+	logger.InfoCF("voice", "Converting audio format", map[string]any{
+		"input":  inputPath,
+		"output": outputPath,
+	})
+
+	if err := cmd.Run(); err != nil {
+		logger.ErrorCF("voice", "Failed to convert audio", map[string]any{
+			"error": err,
+			"input": inputPath,
+		})
+		return "", fmt.Errorf("failed to convert audio: %w", err)
+	}
+
+	logger.InfoCF("voice", "Audio conversion completed", map[string]any{
+		"input":  inputPath,
+		"output": outputPath,
+	})
+
+	return outputPath, nil
+}
+
+// processAudioWithConversion checks if the audio format is supported and converts if needed.
+// Returns the (possibly converted) audio path and a cleanup function.
+func (p *AudioProcessor) processAudioWithConversion(ctx context.Context, audioPath string) (string, func(), error) {
+	// Determine the provider
+	var provider string
+	switch p.transcriber.(type) {
+	case *GroqTranscriber:
+		provider = "groq"
+	case *AlibabaTranscriber:
+		provider = "alibaba"
+	default:
+		provider = "groq" // default
+	}
+
+	// Check if conversion is needed
+	if isFormatSupported(audioPath, provider) {
+		return audioPath, func() {}, nil
+	}
+
+	// Convert the audio file
+	logger.InfoCF("voice", "Audio format not supported, converting", map[string]any{
+		"path":     audioPath,
+		"provider": provider,
+	})
+
+	convertedPath, err := convertAudio(ctx, audioPath)
+	if err != nil {
+		return "", nil, err
+	}
+
+	// Return cleanup function to remove converted file
+	cleanup := func() {
+		if convertedPath != audioPath {
+			os.Remove(convertedPath)
+			logger.DebugCF("voice", "Cleaned up converted audio file", map[string]any{"path": convertedPath})
+		}
+	}
+
+	return convertedPath, cleanup, nil
 }
 
 // GroqTranscriber implements the Transcriber interface using Groq's Whisper API.

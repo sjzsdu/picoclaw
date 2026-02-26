@@ -136,11 +136,51 @@ type AudioFile struct {
 }
 
 func (c *QQChannel) extractAudioFiles(data *dto.WSC2CMessageData) []AudioFile {
-	return []AudioFile{}
+	var audioFiles []AudioFile
+
+	for _, att := range data.Attachments {
+		if att.ContentType == "voice" || isAudioFile(att.FileName) {
+			audioFiles = append(audioFiles, AudioFile{
+				URL:      att.URL,
+				Filename: att.FileName,
+			})
+			logger.DebugCF("qq", "Extracted audio file from C2C message", map[string]any{
+				"filename": att.FileName,
+				"size":     att.Size,
+			})
+		}
+	}
+
+	return audioFiles
+}
+
+func isAudioFile(filename string) bool {
+	extensions := []string{".amr", ".silk", ".mp3", ".wav", ".ogg", ".m4a"}
+	for _, ext := range extensions {
+		if len(filename) >= len(ext) && filename[len(filename)-len(ext):] == ext {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *QQChannel) extractGroupAudioFiles(data *dto.WSGroupATMessageData) []AudioFile {
-	return []AudioFile{}
+	var audioFiles []AudioFile
+
+	for _, att := range data.Attachments {
+		if att.ContentType == "voice" || isAudioFile(att.FileName) {
+			audioFiles = append(audioFiles, AudioFile{
+				URL:      att.URL,
+				Filename: att.FileName,
+			})
+			logger.DebugCF("qq", "Extracted audio file from group message", map[string]any{
+				"filename": att.FileName,
+				"size":     att.Size,
+			})
+		}
+	}
+
+	return audioFiles
 }
 
 func (c *QQChannel) downloadAttachment(url, filename string) string {
