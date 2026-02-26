@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"path/filepath"
 	"strings"
 	"unicode"
 )
@@ -51,4 +52,12 @@ func DerefStr(s *string, fallback string) string {
 		return fallback
 	}
 	return *s
+}
+
+// FileNameFromPath extracts the filename from a full path.
+func FileNameFromPath(path string) string {
+	if path == "" {
+		return ""
+	}
+	return filepath.Base(path)
 }

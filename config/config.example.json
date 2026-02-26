@@ -261,6 +261,13 @@
     "enabled": false,
     "monitor_usb": true
   },
+  "voice": {
+    "enabled": false,
+    "provider": "groq",
+    "api_key": "gsk_xxx",
+    "api_base": "https://api.groq.com/openai/v1",
+    "model": "whisper-large-v3"
+  },
   "gateway": {
     "host": "127.0.0.1",
     "port": 18790

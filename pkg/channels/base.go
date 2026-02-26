@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"encoding/hex"
+	"fmt"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -15,6 +16,8 @@ import (
 	"github.com/sipeed/picoclaw/pkg/identity"
 	"github.com/sipeed/picoclaw/pkg/logger"
 	"github.com/sipeed/picoclaw/pkg/media"
+	"github.com/sipeed/picoclaw/pkg/utils"
+	"github.com/sipeed/picoclaw/pkg/voice"
 )
 
 var (
@@ -90,6 +93,7 @@ type BaseChannel struct {
 	placeholderRecorder PlaceholderRecorder
 	owner               Channel // the concrete channel that embeds this BaseChannel
 	reasoningChannelID  string
+	audioProcessor      *voice.AudioProcessor
 }
 
 func NewBaseChannel(
@@ -334,4 +338,52 @@ func BuildMediaScope(channel, chatID, messageID string) string {
 		id = uniqueID()
 	}
 	return channel + ":" + chatID + ":" + id
+}
+
+// SetAudioProcessor sets the audio processor for voice transcription.
+func (c *BaseChannel) SetAudioProcessor(processor *voice.AudioProcessor) {
+	c.audioProcessor = processor
+}
+
+// GetAudioProcessor returns the audio processor for voice transcription.
+func (c *BaseChannel) GetAudioProcessor() *voice.AudioProcessor {
+	return c.audioProcessor
+}
+
+// HandleAudioMessage processes audio files, optionally transcribing them,
+// and sends the result as a message through the message bus.
+func (c *BaseChannel) HandleAudioMessage(ctx context.Context, senderID, chatID string, audioFiles []string, metadata map[string]string) {
+	if !c.IsAllowed(senderID) {
+		return
+	}
+
+	content := ""
+	for _, audioFile := range audioFiles {
+		if c.audioProcessor != nil && c.audioProcessor.IsAvailable() {
+			tCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+
+			transcribedText, err := c.audioProcessor.ProcessAudio(tCtx, audioFile)
+			cancel()
+			if err != nil {
+				logger.ErrorCF(c.name, "Audio transcription failed", map[string]any{
+					"error": err.Error(),
+					"file":  audioFile,
+				})
+				content += fmt.Sprintf("[audio: %s (transcription failed)]\n", utils.FileNameFromPath(audioFile))
+			} else {
+				content += fmt.Sprintf("[voice transcription: %s]\n", transcribedText)
+				logger.InfoCF(c.name, "Audio transcribed successfully", map[string]any{
+					"preview": utils.Truncate(transcribedText, 50),
+				})
+			}
+		} else {
+			content += fmt.Sprintf("[audio: %s]\n", utils.FileNameFromPath(audioFile))
+		}
+	}
+
+	if content == "" {
+		content = "[empty audio message]"
+	}
+
+	c.HandleMessage(ctx, bus.Peer{}, "", senderID, chatID, content, audioFiles, metadata)
 }

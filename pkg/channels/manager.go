@@ -23,6 +23,7 @@ import (
 	"github.com/sipeed/picoclaw/pkg/health"
 	"github.com/sipeed/picoclaw/pkg/logger"
 	"github.com/sipeed/picoclaw/pkg/media"
+	"github.com/sipeed/picoclaw/pkg/voice"
 )
 
 const (
@@ -205,6 +206,10 @@ func (m *Manager) initChannel(name, displayName string) {
 
 func (m *Manager) initChannels() error {
 	logger.InfoC("channels", "Initializing channel manager")
+
+	// Initialize audio processor for voice transcription
+	audioProcessor := m.createAudioProcessor()
+	m.injectAudioProcessor(audioProcessor)
 
 	if m.config.Channels.Telegram.Enabled && m.config.Channels.Telegram.Token != "" {
 		m.initChannel("telegram", "Telegram")
@@ -821,4 +826,76 @@ func (m *Manager) SendToChannel(ctx context.Context, channelName, chatID, conten
 	// Fallback: direct send (should not happen)
 	channel, _ := m.channels[channelName]
 	return channel.Send(ctx, msg)
+}
+
+// createAudioProcessor creates an AudioProcessor based on the voice configuration.
+func (m *Manager) createAudioProcessor() *voice.AudioProcessor {
+	if !m.config.Voice.Enabled {
+		logger.DebugC("channels", "Voice transcription is disabled")
+		return nil
+	}
+
+	if m.config.Voice.APIKey == "" {
+		logger.WarnC("channels", "Voice transcription enabled but no API key configured")
+		return nil
+	}
+
+	var transcriber voice.Transcriber
+
+	switch m.config.Voice.Provider {
+	case "groq":
+		apiBase := m.config.Voice.APIBase
+		if apiBase == "" {
+			apiBase = "https://api.groq.com/openai/v1"
+		}
+		model := m.config.Voice.Model
+		if model == "" {
+			model = "whisper-large-v3"
+		}
+		transcriber = voice.NewGroqTranscriberWithOptions(m.config.Voice.APIKey, apiBase, model)
+	case "alibaba", "dashscope":
+		apiBase := m.config.Voice.APIBase
+		if apiBase == "" {
+			apiBase = "https://dashscope.aliyuncs.com/api/v1"
+		}
+		model := m.config.Voice.Model
+		if model == "" {
+			model = "paraformer-zh"
+		}
+		transcriber = voice.NewAlibabaTranscriberWithOptions(m.config.Voice.APIKey, apiBase, model)
+	default:
+		logger.WarnCF("channels", "Unknown voice provider, using Groq as default", map[string]any{
+			"provider": m.config.Voice.Provider,
+		})
+		transcriber = voice.NewGroqTranscriber(m.config.Voice.APIKey)
+	}
+
+	logger.InfoCF("channels", "Voice transcription initialized", map[string]any{
+		"provider": m.config.Voice.Provider,
+		"available": transcriber.IsAvailable(),
+	})
+
+	return voice.NewAudioProcessor(transcriber)
+}
+
+// AudioProcessorSetter is an interface for channels that support audio processing.
+type AudioProcessorSetter interface {
+	SetAudioProcessor(*voice.AudioProcessor)
+}
+
+// injectAudioProcessor injects the audio processor into all channels that support it.
+func (m *Manager) injectAudioProcessor(processor *voice.AudioProcessor) {
+	if processor == nil {
+		return
+	}
+
+	for name, channel := range m.channels {
+		// Try to cast to AudioProcessorSetter interface
+		if setter, ok := channel.(AudioProcessorSetter); ok {
+			setter.SetAudioProcessor(processor)
+			logger.DebugCF("channels", "Injected audio processor into channel", map[string]any{
+				"channel": name,
+			})
+		}
+	}
 }

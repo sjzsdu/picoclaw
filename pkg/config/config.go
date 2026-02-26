@@ -58,6 +58,7 @@ type Config struct {
 	Tools     ToolsConfig     `json:"tools"`
 	Heartbeat HeartbeatConfig `json:"heartbeat"`
 	Devices   DevicesConfig   `json:"devices"`
+	Voice     VoiceConfig     `json:"voice"`
 }
 
 // MarshalJSON implements custom JSON marshaling for Config
@@ -380,6 +381,15 @@ type HeartbeatConfig struct {
 type DevicesConfig struct {
 	Enabled    bool `json:"enabled"     env:"PICOCLAW_DEVICES_ENABLED"`
 	MonitorUSB bool `json:"monitor_usb" env:"PICOCLAW_DEVICES_MONITOR_USB"`
+}
+
+// VoiceConfig contains configuration for voice transcription services.
+type VoiceConfig struct {
+	Enabled  bool   `json:"enabled"  env:"PICOCLAW_VOICE_ENABLED"`
+	Provider string `json:"provider" env:"PICOCLAW_VOICE_PROVIDER"` // "groq", "openai", etc.
+	APIKey   string `json:"api_key"  env:"PICOCLAW_VOICE_API_KEY"`
+	APIBase  string `json:"api_base" env:"PICOCLAW_VOICE_API_BASE"`
+	Model    string `json:"model"    env:"PICOCLAW_VOICE_MODEL"`    // e.g., "whisper-large-v3"
 }
 
 type ProvidersConfig struct {

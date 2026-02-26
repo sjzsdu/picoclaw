@@ -3,6 +3,7 @@ package qq
 import (
 	"context"
 	"fmt"
+	"os"
 	"sync"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 	"github.com/sipeed/picoclaw/pkg/config"
 	"github.com/sipeed/picoclaw/pkg/identity"
 	"github.com/sipeed/picoclaw/pkg/logger"
+	"github.com/sipeed/picoclaw/pkg/utils"
 )
 
 type QQChannel struct {
@@ -52,31 +54,25 @@ func (c *QQChannel) Start(ctx context.Context) error {
 
 	logger.InfoC("qq", "Starting QQ bot (WebSocket mode)")
 
-	// create token source
 	credentials := &token.QQBotCredentials{
 		AppID:     c.config.AppID,
 		AppSecret: c.config.AppSecret,
 	}
 	c.tokenSource = token.NewQQBotTokenSource(credentials)
 
-	// create child context
 	c.ctx, c.cancel = context.WithCancel(ctx)
 
-	// start auto-refresh token goroutine
 	if err := token.StartRefreshAccessToken(c.ctx, c.tokenSource); err != nil {
 		return fmt.Errorf("failed to start token refresh: %w", err)
 	}
 
-	// initialize OpenAPI client
 	c.api = botgo.NewOpenAPI(c.config.AppID, c.tokenSource).WithTimeout(5 * time.Second)
 
-	// register event handlers
 	intent := event.RegisterHandlers(
 		c.handleC2CMessage(),
 		c.handleGroupATMessage(),
 	)
 
-	// get WebSocket endpoint
 	wsInfo, err := c.api.WS(c.ctx, nil, "")
 	if err != nil {
 		return fmt.Errorf("failed to get websocket info: %w", err)
@@ -86,10 +82,8 @@ func (c *QQChannel) Start(ctx context.Context) error {
 		"shards": wsInfo.Shards,
 	})
 
-	// create and save sessionManager
 	c.sessionManager = botgo.NewSessionManager()
 
-	// start WebSocket connection in goroutine to avoid blocking
 	go func() {
 		if err := c.sessionManager.Start(wsInfo, c.tokenSource, &intent); err != nil {
 			logger.ErrorCF("qq", "WebSocket session error", map[string]any{
@@ -121,12 +115,10 @@ func (c *QQChannel) Send(ctx context.Context, msg bus.OutboundMessage) error {
 		return channels.ErrNotRunning
 	}
 
-	// construct message
 	msgToCreate := &dto.MessageToCreate{
 		Content: msg.Content,
 	}
 
-	// send C2C message
 	_, err := c.api.PostC2CMessage(ctx, msg.ChatID, msgToCreate)
 	if err != nil {
 		logger.ErrorCF("qq", "Failed to send C2C message", map[string]any{
@@ -138,26 +130,125 @@ func (c *QQChannel) Send(ctx context.Context, msg bus.OutboundMessage) error {
 	return nil
 }
 
-// handleC2CMessage handles QQ private messages
+type AudioFile struct {
+	URL      string
+	Filename string
+}
+
+func (c *QQChannel) extractAudioFiles(data *dto.WSC2CMessageData) []AudioFile {
+	return []AudioFile{}
+}
+
+func (c *QQChannel) extractGroupAudioFiles(data *dto.WSGroupATMessageData) []AudioFile {
+	return []AudioFile{}
+}
+
+func (c *QQChannel) downloadAttachment(url, filename string) string {
+	if url == "" || filename == "" {
+		return ""
+	}
+
+	logger.DebugCF("qq", "Downloading attachment", map[string]any{
+		"url":      url,
+		"filename": filename,
+	})
+
+	return utils.DownloadFile(url, filename, utils.DownloadOptions{
+		LoggerPrefix: "qq",
+	})
+}
+
+func (c *QQChannel) processAudioFiles(audioFiles []AudioFile) (string, []string, []string) {
+	if len(audioFiles) == 0 {
+		return "", []string{}, []string{}
+	}
+
+	content := ""
+	mediaPaths := []string{}
+	localFiles := []string{}
+
+	for _, audioFile := range audioFiles {
+		localPath := c.downloadAttachment(audioFile.URL, audioFile.Filename)
+		if localPath != "" {
+			localFiles = append(localFiles, localPath)
+			mediaPaths = append(mediaPaths, localPath)
+
+			tCtx, cancel := context.WithTimeout(c.ctx, 30*time.Second)
+			transcribedText, err := c.GetAudioProcessor().ProcessAudio(tCtx, localPath)
+			cancel()
+
+			if err != nil {
+				logger.ErrorCF("qq", "Audio transcription failed", map[string]any{
+					"error": err.Error(),
+					"file":  localPath,
+				})
+				transcribedText = fmt.Sprintf("[audio: %s (transcription failed)]", audioFile.Filename)
+			} else {
+				logger.InfoCF("qq", "Audio transcribed successfully", map[string]any{
+					"text": transcribedText,
+				})
+				transcribedText = fmt.Sprintf("[voice transcription: %s]", transcribedText)
+			}
+
+			if content != "" {
+				content += "\n"
+			}
+			content += transcribedText
+		}
+	}
+
+	return content, mediaPaths, localFiles
+}
+
+func (c *QQChannel) cleanupTempFiles(files []string) {
+	for _, file := range files {
+		if err := os.Remove(file); err != nil {
+			logger.DebugCF("qq", "Failed to cleanup temp file", map[string]any{
+				"file":  file,
+				"error": err.Error(),
+			})
+		}
+	}
+}
+
+func (c *QQChannel) extractSenderID(author *dto.User) (string, error) {
+	if author != nil && author.ID != "" {
+		return author.ID, nil
+	}
+	return "", fmt.Errorf("no sender ID")
+}
+
 func (c *QQChannel) handleC2CMessage() event.C2CMessageEventHandler {
 	return func(event *dto.WSPayload, data *dto.WSC2CMessageData) error {
-		// deduplication check
 		if c.isDuplicate(data.ID) {
 			return nil
 		}
 
-		// extract user info
-		var senderID string
-		if data.Author != nil && data.Author.ID != "" {
-			senderID = data.Author.ID
-		} else {
-			logger.WarnC("qq", "Received message with no sender ID")
+		senderID, err := c.extractSenderID(data.Author)
+		if err != nil {
+			logger.WarnC("qq", err.Error())
 			return nil
 		}
 
-		// extract message content
 		content := data.Content
-		if content == "" {
+		audioContent, mediaPaths, localFiles := c.processAudioFiles(c.extractAudioFiles(data))
+		defer c.cleanupTempFiles(localFiles)
+
+		if content != "" {
+			logger.InfoCF("qq", "Received C2C message", map[string]any{
+				"sender": senderID,
+				"length": len(content),
+			})
+		}
+
+		if audioContent != "" {
+			if content != "" {
+				content += "\n"
+			}
+			content += audioContent
+		}
+
+		if content == "" && len(mediaPaths) == 0 {
 			logger.DebugC("qq", "Received empty message, ignoring")
 			return nil
 		}
@@ -190,7 +281,6 @@ func (c *QQChannel) handleC2CMessage() event.C2CMessageEventHandler {
 			metadata,
 			sender,
 		)
-
 		return nil
 	}
 }
@@ -198,23 +288,37 @@ func (c *QQChannel) handleC2CMessage() event.C2CMessageEventHandler {
 // handleGroupATMessage handles QQ group @ messages
 func (c *QQChannel) handleGroupATMessage() event.GroupATMessageEventHandler {
 	return func(event *dto.WSPayload, data *dto.WSGroupATMessageData) error {
-		// deduplication check
 		if c.isDuplicate(data.ID) {
 			return nil
 		}
 
-		// extract user info
-		var senderID string
-		if data.Author != nil && data.Author.ID != "" {
-			senderID = data.Author.ID
-		} else {
-			logger.WarnC("qq", "Received group message with no sender ID")
+		senderID, err := c.extractSenderID(data.Author)
+		if err != nil {
+			logger.WarnC("qq", err.Error())
 			return nil
 		}
 
 		// extract message content (remove @ bot part)
 		content := data.Content
-		if content == "" {
+		audioContent, mediaPaths, localFiles := c.processAudioFiles(c.extractGroupAudioFiles(data))
+		defer c.cleanupTempFiles(localFiles)
+
+		if content != "" {
+			logger.InfoCF("qq", "Received group AT message", map[string]any{
+				"sender": senderID,
+				"group":  data.GroupID,
+				"length": len(content),
+			})
+		}
+
+		if audioContent != "" {
+			if content != "" {
+				content += "\n"
+			}
+			content += audioContent
+		}
+
+		if content == "" && len(mediaPaths) == 0 {
 			logger.DebugC("qq", "Received empty group message, ignoring")
 			return nil
 		}
@@ -257,7 +361,6 @@ func (c *QQChannel) handleGroupATMessage() event.GroupATMessageEventHandler {
 			metadata,
 			sender,
 		)
-
 		return nil
 	}
 }

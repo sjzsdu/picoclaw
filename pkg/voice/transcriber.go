@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -16,12 +17,60 @@ import (
 	"github.com/sipeed/picoclaw/pkg/utils"
 )
 
+// Transcriber defines the interface for audio transcription services.
+type Transcriber interface {
+	Transcribe(ctx context.Context, audioPath string) (*TranscriptionResult, error)
+	IsAvailable() bool
+}
+
+// TranscriptionResult contains the result of a transcription operation.
+type TranscriptionResult struct {
+	Text     string  `json:"text"`
+	Language string  `json:"language,omitempty"`
+	Duration float64 `json:"duration,omitempty"`
+}
+
+// AudioProcessor handles audio file transcription using a Transcriber.
+type AudioProcessor struct {
+	transcriber Transcriber
+}
+
+// NewAudioProcessor creates a new AudioProcessor with the given transcriber.
+func NewAudioProcessor(transcriber Transcriber) *AudioProcessor {
+	return &AudioProcessor{
+		transcriber: transcriber,
+	}
+}
+
+// ProcessAudio transcribes an audio file and returns the text content.
+// Returns an error if the transcriber is not available or transcription fails.
+func (p *AudioProcessor) ProcessAudio(ctx context.Context, audioPath string) (string, error) {
+	if p.transcriber == nil || !p.transcriber.IsAvailable() {
+		return "", errors.New("transcriber not available")
+	}
+
+	result, err := p.transcriber.Transcribe(ctx, audioPath)
+	if err != nil {
+		return "", err
+	}
+
+	return result.Text, nil
+}
+
+// IsAvailable returns true if the audio processor has a available transcriber.
+func (p *AudioProcessor) IsAvailable() bool {
+	return p.transcriber != nil && p.transcriber.IsAvailable()
+}
+
+// GroqTranscriber implements the Transcriber interface using Groq's Whisper API.
 type GroqTranscriber struct {
 	apiKey     string
 	apiBase    string
 	httpClient *http.Client
+	model      string
 }
 
+// TranscriptionResponse is kept for backward compatibility
 type TranscriptionResponse struct {
 	Text     string  `json:"text"`
 	Language string  `json:"language,omitempty"`
@@ -29,19 +78,25 @@ type TranscriptionResponse struct {
 }
 
 func NewGroqTranscriber(apiKey string) *GroqTranscriber {
+	return NewGroqTranscriberWithOptions(apiKey, "https://api.groq.com/openai/v1", "whisper-large-v3")
+}
+
+// NewGroqTranscriberWithOptions creates a GroqTranscriber with custom options.
+func NewGroqTranscriberWithOptions(apiKey, apiBase, model string) *GroqTranscriber {
 	logger.DebugCF("voice", "Creating Groq transcriber", map[string]any{"has_api_key": apiKey != ""})
 
-	apiBase := "https://api.groq.com/openai/v1"
 	return &GroqTranscriber{
 		apiKey:  apiKey,
 		apiBase: apiBase,
+		model:   model,
 		httpClient: &http.Client{
 			Timeout: 60 * time.Second,
 		},
 	}
 }
 
-func (t *GroqTranscriber) Transcribe(ctx context.Context, audioFilePath string) (*TranscriptionResponse, error) {
+// Transcribe implements the Transcriber interface.
+func (t *GroqTranscriber) Transcribe(ctx context.Context, audioFilePath string) (*TranscriptionResult, error) {
 	logger.InfoCF("voice", "Starting transcription", map[string]any{"audio_file": audioFilePath})
 
 	audioFile, err := os.Open(audioFilePath)
@@ -79,7 +134,7 @@ func (t *GroqTranscriber) Transcribe(ctx context.Context, audioFilePath string) 
 
 	logger.DebugCF("voice", "File copied to request", map[string]any{"bytes_copied": copied})
 
-	if err = writer.WriteField("model", "whisper-large-v3"); err != nil {
+	if err = writer.WriteField("model", t.model); err != nil {
 		logger.ErrorCF("voice", "Failed to write model field", map[string]any{"error": err})
 		return nil, fmt.Errorf("failed to write model field: %w", err)
 	}
@@ -149,11 +204,174 @@ func (t *GroqTranscriber) Transcribe(ctx context.Context, audioFilePath string) 
 		"transcription_preview": utils.Truncate(result.Text, 50),
 	})
 
-	return &result, nil
+	return &TranscriptionResult{
+		Text:     result.Text,
+		Language: result.Language,
+		Duration: result.Duration,
+	}, nil
 }
 
 func (t *GroqTranscriber) IsAvailable() bool {
 	available := t.apiKey != ""
 	logger.DebugCF("voice", "Checking transcriber availability", map[string]any{"available": available})
+	return available
+}
+
+// AlibabaTranscriber implements the Transcriber interface using Alibaba Cloud's DashScope API.
+// Uses the Paraformer-v2 model which supports Chinese and English speech recognition.
+type AlibabaTranscriber struct {
+	apiKey     string
+	apiBase    string
+	httpClient *http.Client
+	model      string
+}
+
+// NewAlibabaTranscriber creates a new Alibaba transcriber using DashScope API.
+func NewAlibabaTranscriber(apiKey string) *AlibabaTranscriber {
+	return NewAlibabaTranscriberWithOptions(apiKey, "https://dashscope.aliyuncs.com/api/v1", "paraformer-zh")
+}
+
+// NewAlibabaTranscriberWithOptions creates an Alibaba transcriber with custom options.
+func NewAlibabaTranscriberWithOptions(apiKey, apiBase, model string) *AlibabaTranscriber {
+	logger.DebugCF("voice", "Creating Alibaba transcriber", map[string]any{"has_api_key": apiKey != ""})
+
+	return &AlibabaTranscriber{
+		apiKey:  apiKey,
+		apiBase: apiBase,
+		model:   model,
+		httpClient: &http.Client{
+			Timeout: 60 * time.Second,
+		},
+	}
+}
+
+// Transcribe implements the Transcriber interface for Alibaba Cloud.
+func (t *AlibabaTranscriber) Transcribe(ctx context.Context, audioFilePath string) (*TranscriptionResult, error) {
+	logger.InfoCF("voice", "Starting Alibaba transcription", map[string]any{"audio_file": audioFilePath})
+
+	audioFile, err := os.Open(audioFilePath)
+	if err != nil {
+		logger.ErrorCF("voice", "Failed to open audio file", map[string]any{"path": audioFilePath, "error": err})
+		return nil, fmt.Errorf("failed to open audio file: %w", err)
+	}
+	defer audioFile.Close()
+
+	fileInfo, err := audioFile.Stat()
+	if err != nil {
+		logger.ErrorCF("voice", "Failed to get file info", map[string]any{"path": audioFilePath, "error": err})
+		return nil, fmt.Errorf("failed to get file info: %w", err)
+	}
+
+	logger.DebugCF("voice", "Audio file details", map[string]any{
+		"size_bytes": fileInfo.Size(),
+		"file_name":  filepath.Base(audioFilePath),
+	})
+
+	var requestBody bytes.Buffer
+	writer := multipart.NewWriter(&requestBody)
+
+	part, err := writer.CreateFormFile("file", filepath.Base(audioFilePath))
+	if err != nil {
+		logger.ErrorCF("voice", "Failed to create form file", map[string]any{"error": err})
+		return nil, fmt.Errorf("failed to create form file: %w", err)
+	}
+
+	copied, err := io.Copy(part, audioFile)
+	if err != nil {
+		logger.ErrorCF("voice", "Failed to copy file content", map[string]any{"error": err})
+		return nil, fmt.Errorf("failed to copy file content: %w", err)
+	}
+
+	logger.DebugCF("voice", "File copied to request", map[string]any{"bytes_copied": copied})
+
+	// DashScope uses "model" field for file transcription
+	if err = writer.WriteField("model", t.model); err != nil {
+		logger.ErrorCF("voice", "Failed to write model field", map[string]any{"error": err})
+		return nil, fmt.Errorf("failed to write model field: %w", err)
+	}
+
+	if err = writer.Close(); err != nil {
+		logger.ErrorCF("voice", "Failed to close multipart writer", map[string]any{"error": err})
+		return nil, fmt.Errorf("failed to close multipart writer: %w", err)
+	}
+
+	// Alibaba DashScope file transcription API (aigc speech-recognition)
+	url := t.apiBase + "/services/aigc/speech-recognition/files"
+	req, err := http.NewRequestWithContext(ctx, "POST", url, &requestBody)
+	if err != nil {
+		logger.ErrorCF("voice", "Failed to create request", map[string]any{"error": err})
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("Authorization", "Bearer "+t.apiKey)
+	// DashScope requires X-DashScope-Async header for file transcription
+	req.Header.Set("X-DashScope-Async", "disable")
+
+	logger.DebugCF("voice", "Sending transcription request to Alibaba API", map[string]any{
+		"url":                url,
+		"request_size_bytes": requestBody.Len(),
+		"file_size_bytes":    fileInfo.Size(),
+	})
+
+	resp, err := t.httpClient.Do(req)
+	if err != nil {
+		logger.ErrorCF("voice", "Failed to send request", map[string]any{"error": err})
+		return nil, fmt.Errorf("failed to send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		logger.ErrorCF("voice", "Failed to read response", map[string]any{"error": err})
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		logger.ErrorCF("voice", "API error", map[string]any{
+			"status_code": resp.StatusCode,
+			"response":    string(body),
+		})
+		return nil, fmt.Errorf("API error (status %d): %s", resp.StatusCode, string(body))
+	}
+
+	logger.DebugCF("voice", "Received response from Alibaba API", map[string]any{
+		"status_code":         resp.StatusCode,
+		"response_size_bytes": len(body),
+	})
+
+	// Parse Alibaba DashScope response
+	// Response format: {"output":{"text":"transcribed text"},"request_id":"xxx"}
+	var result struct {
+		Output struct {
+			Text string `json:"text"`
+		} `json:"output"`
+		RequestID string `json:"request_id"`
+	}
+
+	if err := json.Unmarshal(body, &result); err != nil {
+		logger.ErrorCF("voice", "Failed to unmarshal response", map[string]any{"error": err, "response": string(body)})
+		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+	}
+
+	if result.Output.Text == "" {
+		logger.ErrorCF("voice", "Empty transcription result", map[string]any{"response": string(body)})
+		return nil, fmt.Errorf("empty transcription result")
+	}
+
+	logger.InfoCF("voice", "Alibaba transcription completed successfully", map[string]any{
+		"text_length":           len(result.Output.Text),
+		"request_id":            result.RequestID,
+		"transcription_preview": utils.Truncate(result.Output.Text, 50),
+	})
+
+	return &TranscriptionResult{
+		Text: result.Output.Text,
+	}, nil
+}
+
+func (t *AlibabaTranscriber) IsAvailable() bool {
+	available := t.apiKey != ""
+	logger.DebugCF("voice", "Checking Alibaba transcriber availability", map[string]any{"available": available})
 	return available
 }

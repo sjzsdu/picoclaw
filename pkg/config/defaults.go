@@ -343,5 +343,12 @@ func DefaultConfig() *Config {
 			Enabled:    false,
 			MonitorUSB: true,
 		},
+		Voice: VoiceConfig{
+			Enabled:  false,
+			Provider: "groq",
+			APIKey:   "",
+			APIBase:  "https://api.groq.com/openai/v1",
+			Model:    "whisper-large-v3",
+		},
 	}
 }
