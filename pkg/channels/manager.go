@@ -830,13 +830,21 @@ func (m *Manager) SendToChannel(ctx context.Context, channelName, chatID, conten
 
 // createAudioProcessor creates an AudioProcessor based on the voice configuration.
 func (m *Manager) createAudioProcessor() *voice.AudioProcessor {
+	logger.InfoCF("channels", "Voice config loaded", map[string]any{
+		"enabled":      m.config.Voice.Enabled,
+		"provider":     m.config.Voice.Provider,
+		"has_api_key":  m.config.Voice.APIKey != "",
+		"api_base":     m.config.Voice.APIBase,
+		"model":        m.config.Voice.Model,
+	})
+
 	if !m.config.Voice.Enabled {
-		logger.DebugC("channels", "Voice transcription is disabled")
+		logger.WarnC("channels", "Voice transcription is disabled (voice.enabled=false)")
 		return nil
 	}
 
 	if m.config.Voice.APIKey == "" {
-		logger.WarnC("channels", "Voice transcription enabled but no API key configured")
+		logger.WarnC("channels", "Voice transcription enabled but no API key configured (voice.api_key is empty)")
 		return nil
 	}
 
@@ -856,11 +864,11 @@ func (m *Manager) createAudioProcessor() *voice.AudioProcessor {
 	case "alibaba", "dashscope":
 		apiBase := m.config.Voice.APIBase
 		if apiBase == "" {
-			apiBase = "https://dashscope.aliyuncs.com/api/v1"
+			apiBase = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 		}
 		model := m.config.Voice.Model
 		if model == "" {
-			model = "paraformer-zh"
+			model = "qwen3-asr-flash"
 		}
 		transcriber = voice.NewAlibabaTranscriberWithOptions(m.config.Voice.APIKey, apiBase, model)
 	default:
@@ -871,7 +879,7 @@ func (m *Manager) createAudioProcessor() *voice.AudioProcessor {
 	}
 
 	logger.InfoCF("channels", "Voice transcription initialized", map[string]any{
-		"provider": m.config.Voice.Provider,
+		"provider":  m.config.Voice.Provider,
 		"available": transcriber.IsAvailable(),
 	})
 
@@ -889,13 +897,18 @@ func (m *Manager) injectAudioProcessor(processor *voice.AudioProcessor) {
 		return
 	}
 
+	injected := 0
 	for name, channel := range m.channels {
-		// Try to cast to AudioProcessorSetter interface
 		if setter, ok := channel.(AudioProcessorSetter); ok {
 			setter.SetAudioProcessor(processor)
-			logger.DebugCF("channels", "Injected audio processor into channel", map[string]any{
+			injected++
+			logger.InfoCF("channels", "Injected audio processor into channel", map[string]any{
 				"channel": name,
 			})
 		}
 	}
+	logger.InfoCF("channels", "Audio processor injection complete", map[string]any{
+		"total_channels":    len(m.channels),
+		"injected_channels": injected,
+	})
 }

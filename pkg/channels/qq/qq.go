@@ -213,27 +213,33 @@ func (c *QQChannel) processAudioFiles(audioFiles []AudioFile) (string, []string,
 			localFiles = append(localFiles, localPath)
 			mediaPaths = append(mediaPaths, localPath)
 
-			tCtx, cancel := context.WithTimeout(c.ctx, 30*time.Second)
-			transcribedText, err := c.GetAudioProcessor().ProcessAudio(tCtx, localPath)
-			cancel()
+			// Check if audio processor is available
+			if c.GetAudioProcessor() != nil && c.GetAudioProcessor().IsAvailable() {
+				tCtx, cancel := context.WithTimeout(c.ctx, 30*time.Second)
+				transcribedText, err := c.GetAudioProcessor().ProcessAudio(tCtx, localPath)
+				cancel()
 
-			if err != nil {
-				logger.ErrorCF("qq", "Audio transcription failed", map[string]any{
-					"error": err.Error(),
-					"file":  localPath,
-				})
-				transcribedText = fmt.Sprintf("[audio: %s (transcription failed)]", audioFile.Filename)
+				if err != nil {
+					logger.ErrorCF("qq", "Audio transcription failed", map[string]any{
+						"error": err.Error(),
+						"file":  localPath,
+					})
+					transcribedText = fmt.Sprintf("[audio: %s (transcription failed)]", audioFile.Filename)
+				} else {
+					transcribedText = fmt.Sprintf("[voice transcription: %s]", transcribedText)
+				}
+
+				if content != "" {
+					content += "\n"
+				}
+				content += transcribedText
 			} else {
-				logger.InfoCF("qq", "Audio transcribed successfully", map[string]any{
-					"text": transcribedText,
-				})
-				transcribedText = fmt.Sprintf("[voice transcription: %s]", transcribedText)
+				// Audio processor not available, just reference the file
+				if content != "" {
+					content += "\n"
+				}
+				content += fmt.Sprintf("[audio: %s]", audioFile.Filename)
 			}
-
-			if content != "" {
-				content += "\n"
-			}
-			content += transcribedText
 		}
 	}
 
