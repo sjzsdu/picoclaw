@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
+	"regexp"
 	"strings"
 	"sync/atomic"
 
@@ -13,6 +15,11 @@ import (
 	"github.com/sipeed/picoclaw/pkg/credential"
 	"github.com/sipeed/picoclaw/pkg/fileutil"
 )
+
+// envVarPattern matches environment variable references in config values.
+// Supports both $VAR and ${VAR} syntax.
+// Note: Variable names must start with a letter or underscore (not digits), so $10 won't be matched.
+var envVarPattern = regexp.MustCompile(`\$(\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))`)
 
 // rrCounter is a global counter for round-robin load balancing across models.
 var rrCounter atomic.Uint64
@@ -879,6 +886,10 @@ func LoadConfig(path string) (*Config, error) {
 	// Expand multi-key configs into separate entries for key-level failover
 	cfg.ModelList = ExpandMultiKeyModels(cfg.ModelList)
 
+	// Expand environment variables in config values (e.g., $VAR or ${VAR})
+	if err := expandEnvVars(cfg); err != nil {
+		return nil, err
+	}
 	// Migrate legacy channel config fields to new unified structures
 	cfg.migrateChannelConfigs()
 
@@ -1244,4 +1255,103 @@ func (t *ToolsConfig) IsToolEnabled(name string) bool {
 	default:
 		return true
 	}
+}
+
+// expandEnvVars recursively expands environment variables in string fields of the config.
+// Supports both $VAR and ${VAR} syntax.
+// If an environment variable is not set, it will be replaced with an empty string.
+func expandEnvVars(v interface{}) error {
+	return expandEnvVarsRecursive(reflect.ValueOf(v), true)
+}
+
+func expandEnvVarsRecursive(v reflect.Value, topLevel bool) error {
+	// Handle pointer types
+	if v.Kind() == reflect.Ptr {
+		if v.IsNil() {
+			return nil
+		}
+		return expandEnvVarsRecursive(v.Elem(), topLevel)
+	}
+
+	switch v.Kind() {
+	case reflect.String:
+		if v.CanSet() {
+			newVal, replaced, err := expandStringEnvVars(v.String())
+			if err != nil {
+				return err
+			}
+			if replaced {
+				v.SetString(newVal)
+			}
+		}
+
+	case reflect.Slice:
+		for i := 0; i < v.Len(); i++ {
+			if err := expandEnvVarsRecursive(v.Index(i), false); err != nil {
+				return err
+			}
+		}
+
+	case reflect.Map:
+		for _, key := range v.MapKeys() {
+			if err := expandEnvVarsRecursive(v.MapIndex(key), false); err != nil {
+				return err
+			}
+		}
+
+	case reflect.Struct:
+		for i := 0; i < v.NumField(); i++ {
+			field := v.Field(i)
+			// Skip unexported fields
+			if !field.CanSet() {
+				continue
+			}
+			// Also expand string slices like FlexibleStringSlice
+			if field.Kind() == reflect.Slice && field.Type().Elem().Kind() == reflect.String {
+				for j := 0; j < field.Len(); j++ {
+					elem := field.Index(j)
+					if elem.CanSet() && elem.Kind() == reflect.String {
+						newVal, replaced, err := expandStringEnvVars(elem.String())
+						if err != nil {
+							return err
+						}
+						if replaced {
+							elem.SetString(newVal)
+						}
+					}
+				}
+			} else {
+				if err := expandEnvVarsRecursive(field, false); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// expandStringEnvVars expands $VAR and ${VAR} patterns in a string.
+// If the environment variable is not set, it will be replaced with empty string.
+// Returns: (expanded string, whether any replacement was made, error)
+func expandStringEnvVars(s string) (string, bool, error) {
+	if !envVarPattern.MatchString(s) {
+		return s, false, nil
+	}
+
+	replaced := envVarPattern.ReplaceAllStringFunc(s, func(match string) string {
+		// Extract variable name (without $ or {})
+		// The regex captures: ${VAR} -> group 2, $VAR -> group 3
+		match = match[1:] // remove leading $
+		if len(match) > 0 && match[0] == '{' {
+			match = match[1 : len(match)-1] // remove {}
+		}
+		return os.Getenv(match)
+	})
+
+	return replaced, true, nil
+}
+
+// ExpandEnvVars is a public wrapper for testing or manual expansion.
+func ExpandEnvVars(s string) (string, bool, error) {
+	return expandStringEnvVars(s)
 }
