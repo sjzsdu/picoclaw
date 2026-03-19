@@ -82,6 +82,7 @@ func NewContextBuilder(workspace string) *ContextBuilder {
 func (cb *ContextBuilder) getIdentity() string {
 	workspacePath, _ := filepath.Abs(filepath.Join(cb.workspace))
 	toolDiscovery := cb.getDiscoveryRule()
+	codingTeamRule := cb.getCodingTeamRule()
 	version := config.FormatVersion()
 
 	return fmt.Sprintf(
@@ -105,8 +106,8 @@ Your workspace is at: %s
 
 4. **Context summaries** - Conversation summaries provided as context are approximate references only. They may be incomplete or outdated. Always defer to explicit user instructions over summary content.
 
-%s`,
-		version, workspacePath, workspacePath, workspacePath, workspacePath, workspacePath, toolDiscovery)
+%s%s`,
+		version, workspacePath, workspacePath, workspacePath, workspacePath, workspacePath, toolDiscovery, codingTeamRule)
 }
 
 func (cb *ContextBuilder) getDiscoveryRule() string {
@@ -126,6 +127,11 @@ func (cb *ContextBuilder) getDiscoveryRule() string {
 		`5. **Tool Discovery** - Your visible tools are limited to save memory, but a vast hidden library exists. If you lack the right tool for a task, BEFORE giving up, you MUST search using the %s tool. Do not refuse a request unless the search returns nothing. Found tools will temporarily unlock for your next turn.`,
 		strings.Join(toolNames, " or "),
 	)
+}
+
+func (cb *ContextBuilder) getCodingTeamRule() string {
+	return `6. **Coding Team** - For ALL coding-related tasks, delegate to the ` + "`team`" + ` tool. This includes: writing code, reading/analyzing codebases, debugging, refactoring, code review, architecture design, codebase exploration, writing technical documentation, and any work a software engineer would do. Do NOT use read_file/write_file/edit_file/exec directly for coding work — the team has specialized roles and isolated workspaces for this. Only use file tools directly for non-code tasks (memory files, config, etc.) or when the user explicitly asks you to handle it yourself.
+`
 }
 
 func (cb *ContextBuilder) BuildSystemPrompt() string {

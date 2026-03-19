@@ -62,3 +62,6 @@ web/backend/dist/*
 logs
 .opencode
 ai-docs
+
+# Worktrees
+.worktrees/

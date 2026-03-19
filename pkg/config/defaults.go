@@ -401,6 +401,17 @@ func DefaultConfig() *Config {
 			HotReload: false,
 		},
 		Tools: ToolsConfig{
+			Team: TeamToolsConfig{
+				Enabled:              true,
+				DefaultExecutionMode: "parallel",
+				MaxParallelTasks:     5,
+				EnableAdvisor:        true,
+				WorkspaceBase:        filepath.Join(homePath, "team-workspace"),
+				BareReposDir:         ".bare-repos",
+				BranchPrefix:         "team",
+				AutoPR:               true,
+				CleanupOnSuccess:     true,
+			},
 			MediaCleanup: MediaCleanupConfig{
 				ToolConfig: ToolConfig{
 					Enabled: true,

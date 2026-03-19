@@ -14,8 +14,10 @@ import (
 	"github.com/sipeed/picoclaw/cmd/picoclaw/internal"
 	"github.com/sipeed/picoclaw/pkg/agent"
 	"github.com/sipeed/picoclaw/pkg/bus"
+	"github.com/sipeed/picoclaw/pkg/config"
 	"github.com/sipeed/picoclaw/pkg/logger"
 	"github.com/sipeed/picoclaw/pkg/providers"
+	"github.com/sipeed/picoclaw/pkg/team"
 )
 
 func agentCmd(message, sessionKey, model string, debug bool) error {
@@ -51,6 +53,13 @@ func agentCmd(message, sessionKey, model string, debug bool) error {
 	defer msgBus.Close()
 	agentLoop := agent.NewAgentLoop(cfg, msgBus, provider)
 	defer agentLoop.Close()
+
+	teamBridge := setupTeamTool(agentLoop, provider, cfg)
+	defer func() {
+		if teamBridge != nil {
+			teamBridge.Stop()
+		}
+	}()
 
 	// Print agent startup info (only for interactive mode)
 	startupInfo := agentLoop.GetStartupInfo()
@@ -160,4 +169,44 @@ func simpleInteractiveMode(agentLoop *agent.AgentLoop, sessionKey string) {
 
 		fmt.Printf("\n%s %s\n\n", internal.Logo, response)
 	}
+}
+
+func setupTeamTool(
+	agentLoop *agent.AgentLoop,
+	provider providers.LLMProvider,
+	cfg *config.Config,
+) *team.TeamCoordinatorBridge {
+	if !cfg.Tools.Team.Enabled {
+		return nil
+	}
+
+	bridge, err := team.NewTeamCoordinatorBridge(provider, agentLoop, &cfg.Tools.Team)
+	if err != nil {
+		logger.ErrorCF("team", "Failed to create team coordinator bridge", map[string]any{"error": err.Error()})
+		return nil
+	}
+
+	// Configure workspace components for multi-repo support
+	workspaceBase := cfg.Tools.Team.WorkspaceBase
+	if workspaceBase == "" {
+		workspaceBase = filepath.Join(cfg.WorkspacePath(), "team-workspace")
+	}
+	bridge.SetRepoManager(team.NewRepoManager(
+		workspaceBase,
+		cfg.Tools.Team.GitToken,
+		cfg.Tools.Team.BranchPrefix,
+	))
+	bridge.SetToolFactory(team.NewToolFactory())
+	bridge.SetCommitManager(team.NewCommitManager(cfg.Tools.Team.AutoPR))
+	bridge.SetDefaultModel(cfg.Agents.Defaults.ModelName)
+
+	bridge.Start()
+	if !bridge.IsRunning() {
+		logger.ErrorCF("team", "Team coordinator failed to start, tool not registered", nil)
+		return nil
+	}
+
+	agentLoop.RegisterTool(team.NewTeamTool(bridge))
+	logger.InfoCF("team", "Team collaboration tool registered", nil)
+	return bridge
 }

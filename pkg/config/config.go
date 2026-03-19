@@ -780,6 +780,7 @@ type ToolsConfig struct {
 	Subagent        ToolConfig         `json:"subagent"                                                 envPrefix:"PICOCLAW_TOOLS_SUBAGENT_"`
 	WebFetch        ToolConfig         `json:"web_fetch"                                                envPrefix:"PICOCLAW_TOOLS_WEB_FETCH_"`
 	WriteFile       ToolConfig         `json:"write_file"                                               envPrefix:"PICOCLAW_TOOLS_WRITE_FILE_"`
+	Team            TeamToolsConfig    `json:"team"`
 }
 
 type SearchCacheConfig struct {
@@ -834,6 +835,105 @@ type MCPConfig struct {
 	Discovery  ToolDiscoveryConfig `                                json:"discovery"`
 	// Servers is a map of server name to server configuration
 	Servers map[string]MCPServerConfig `json:"servers,omitempty"`
+}
+
+// TeamToolsConfig defines configuration for the multi-agent team collaboration tool
+type TeamToolsConfig struct {
+	// Enabled enables/disables the team collaboration tool
+	Enabled bool `json:"enabled" env:"PICOCLAW_TOOLS_TEAM_ENABLED"`
+	// DefaultExecutionMode is the default execution mode: parallel, sequential, pipeline
+	DefaultExecutionMode string `json:"default_execution_mode" env:"PICOCLAW_TOOLS_TEAM_DEFAULT_EXECUTION_MODE"`
+	// MaxParallelTasks is the maximum number of parallel tasks
+	MaxParallelTasks int `json:"max_parallel_tasks" env:"PICOCLAW_TOOLS_TEAM_MAX_PARALLEL_TASKS"`
+	// EnableAdvisor enables the advisor mode (automatic consultation on failures)
+	EnableAdvisor bool `json:"enable_advisor" env:"PICOCLAW_TOOLS_TEAM_ENABLE_ADVISOR"`
+	// Roles is an optional override for role configurations
+	Roles []TeamRoleConfig `json:"roles,omitempty"`
+	// WorkspaceBase is the root directory for team workspaces
+	WorkspaceBase string `json:"workspace_base" env:"PICOCLAW_TOOLS_TEAM_WORKSPACE_BASE"`
+	// BareReposDir is the subdirectory name for bare repo cache (relative to WorkspaceBase)
+	BareReposDir string `json:"bare_repos_dir" env:"PICOCLAW_TOOLS_TEAM_BARE_REPOS_DIR"`
+	// BranchPrefix is the prefix for feature branches created by team tasks
+	BranchPrefix string `json:"branch_prefix" env:"PICOCLAW_TOOLS_TEAM_BRANCH_PREFIX"`
+	// GitToken is an optional token for HTTPS-based git operations (overrides SSH)
+	GitToken string `json:"git_token" env:"PICOCLAW_TOOLS_TEAM_GIT_TOKEN"`
+	// AutoPR enables automatic PR creation after pushing
+	AutoPR bool `json:"auto_pr" env:"PICOCLAW_TOOLS_TEAM_AUTO_PR"`
+	// CleanupOnSuccess removes worktrees after successful PR creation
+	CleanupOnSuccess bool `json:"cleanup_on_success" env:"PICOCLAW_TOOLS_TEAM_CLEANUP"`
+}
+
+// GetEnabled returns whether the team tool is enabled
+func (ttc TeamToolsConfig) GetEnabled() bool {
+	return ttc.Enabled
+}
+
+// GetDefaultExecutionMode returns the default execution mode
+func (ttc TeamToolsConfig) GetDefaultExecutionMode() string {
+	return ttc.DefaultExecutionMode
+}
+
+// GetMaxParallelTasks returns the max parallel tasks
+func (ttc TeamToolsConfig) GetMaxParallelTasks() int {
+	return ttc.MaxParallelTasks
+}
+
+// GetEnableAdvisor returns whether advisor mode is enabled
+func (ttc TeamToolsConfig) GetEnableAdvisor() bool {
+	return ttc.EnableAdvisor
+}
+
+// GetRoles returns the role configurations
+func (ttc TeamToolsConfig) GetRoles() []TeamRoleConfig {
+	return ttc.Roles
+}
+
+// TeamRoleConfig defines configuration for a specific team role
+type TeamRoleConfig struct {
+	// Role is the role name (e.g., TaskLeader, CodeBuilder)
+	Role string `json:"role"`
+	// Model is the model configuration for this role (supports string or object format)
+	// String format: "claude-sonnet-4-20250514"
+	// Object format: {"primary": "claude-sonnet-4-20250514", "fallbacks": ["gpt-4o"]}
+	Model *AgentModelConfig `json:"model,omitempty"`
+	// MaxRetries is the maximum number of retries on failure
+	MaxRetries int `json:"max_retries"`
+	// Timeout is the task timeout (e.g., "5m", "10s")
+	Timeout string `json:"timeout"`
+	// Tools is a list of allowed tools for this role
+	Tools []string `json:"tools"`
+	// SystemPrompt is the system prompt for this role
+	SystemPrompt string `json:"system_prompt"`
+}
+
+// GetRole returns the role name
+func (trc TeamRoleConfig) GetRole() string {
+	return trc.Role
+}
+
+// GetModel returns the model configuration
+func (trc TeamRoleConfig) GetModel() *AgentModelConfig {
+	return trc.Model
+}
+
+// GetMaxRetries returns the max retries
+func (trc TeamRoleConfig) GetMaxRetries() int {
+	return trc.MaxRetries
+}
+
+// GetTimeout returns the timeout
+func (trc TeamRoleConfig) GetTimeout() string {
+	return trc.Timeout
+}
+
+// GetTools returns the allowed tools
+func (trc TeamRoleConfig) GetTools() []string {
+	return trc.Tools
+}
+
+// GetSystemPrompt returns the system prompt
+func (trc TeamRoleConfig) GetSystemPrompt() string {
+	return trc.SystemPrompt
 }
 
 func LoadConfig(path string) (*Config, error) {

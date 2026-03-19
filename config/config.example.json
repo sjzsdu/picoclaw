@@ -507,6 +507,74 @@
     },
     "write_file": {
       "enabled": true
+    },
+    "team": {
+      "enabled": true,
+      "default_execution_mode": "parallel",
+      "max_parallel_tasks": 5,
+      "enable_advisor": true,
+      "workspace_base": "~/.picoclaw/team-workspace",
+      "bare_repos_dir": ".bare-repos",
+      "branch_prefix": "team",
+      "git_token": "",
+      "auto_pr": true,
+      "cleanup_on_success": true,
+      "roles": [
+        {
+          "role": "TaskLeader",
+          "model": "claude-sonnet-4.6",
+          "max_retries": 3,
+          "timeout": "10m"
+        },
+        {
+          "role": "CodeBuilder",
+          "model": {"primary": "gpt4", "fallbacks": ["claude-sonnet-4.6"]},
+          "max_retries": 3,
+          "timeout": "15m"
+        },
+        {
+          "role": "StrategicPlanner",
+          "model": "claude-sonnet-4.6",
+          "max_retries": 2,
+          "timeout": "5m"
+        },
+        {
+          "role": "TechAdvisor",
+          "model": "claude-sonnet-4.6",
+          "max_retries": 2,
+          "timeout": "5m"
+        },
+        {
+          "role": "LibraryResearcher",
+          "model": {"primary": "deepseek", "fallbacks": ["gpt4", "claude-sonnet-4.6"]},
+          "max_retries": 2,
+          "timeout": "3m"
+        },
+        {
+          "role": "CodeExplorer",
+          "model": "deepseek",
+          "max_retries": 2,
+          "timeout": "3m"
+        },
+        {
+          "role": "PreAnalyzer",
+          "model": "claude-sonnet-4.6",
+          "max_retries": 2,
+          "timeout": "5m"
+        },
+        {
+          "role": "PlanReviewer",
+          "model": "claude-sonnet-4.6",
+          "max_retries": 2,
+          "timeout": "3m"
+        },
+        {
+          "role": "VisionAnalyzer",
+          "model": {"primary": "gpt4", "fallbacks": ["claude-sonnet-4.6"]},
+          "max_retries": 3,
+          "timeout": "10m"
+        }
+      ]
     }
   },
   "heartbeat": {
