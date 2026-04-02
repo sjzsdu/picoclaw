@@ -71,6 +71,8 @@ type services struct {
 	manualReloadChan chan struct{}
 	reloading        atomic.Bool
 	authToken        string
+	workerPool       *agent.WorkerPool
+	agentLoop        *agent.AgentLoop
 }
 
 type startupBlockedProvider struct {
@@ -195,8 +197,20 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) (runEr
 		cfg.Agents.Defaults.ModelName = modelID
 	}
 
-	msgBus := bus.NewMessageBus()
-	agentLoop := agent.NewAgentLoop(cfg, msgBus, provider)
+	workerCount := cfg.Gateway.GetWorkerCount()
+	inboundBuffer := cfg.Gateway.GetInboundBuffer()
+	msgBus := bus.NewMessageBusWithBuffer(inboundBuffer)
+
+	var agentLoop *agent.AgentLoop
+	var workerPool *agent.WorkerPool
+
+	if workerCount > 1 {
+		fmt.Printf("\n🚀 Starting in worker pool mode (%d workers)\n", workerCount)
+		workerPool = agent.NewWorkerPool(cfg, msgBus, provider, workerCount)
+		agentLoop = workerPool.GetWorkerByID(0)
+	} else {
+		agentLoop = agent.NewAgentLoop(cfg, msgBus, provider)
+	}
 
 	fmt.Println("\n📦 Agent Status:")
 	startupInfo := agentLoop.GetStartupInfo()
@@ -212,11 +226,13 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) (runEr
 			"skills_available": skillsInfo["available"],
 		})
 
-	runningServices, err := setupAndStartServices(cfg, agentLoop, msgBus, pidData.Token, listenResult)
+	runningServices, err := setupAndStartServices(cfg, agentLoop, workerPool, msgBus, pidData.Token, listenResult)
 	if err != nil {
 		return err
 	}
 	closeListeners = false
+	runningServices.workerPool = workerPool
+	runningServices.agentLoop = agentLoop
 
 	// Setup manual reload channel for /reload endpoint
 	manualReloadChan := make(chan struct{}, 1)
@@ -235,7 +251,11 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) (runEr
 		}
 	}
 	runningServices.HealthServer.SetReloadFunc(reloadTrigger)
-	agentLoop.SetReloadFunc(reloadTrigger)
+	if workerPool != nil {
+		workerPool.SetReloadFunc(reloadTrigger)
+	} else {
+		agentLoop.SetReloadFunc(reloadTrigger)
+	}
 
 	for _, bindHost := range listenResult.BindHosts {
 		fmt.Printf("✓ Gateway started on %s\n", net.JoinHostPort(bindHost, strconv.Itoa(cfg.Gateway.Port)))
@@ -245,7 +265,11 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) (runEr
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	go agentLoop.Run(ctx)
+	if workerPool != nil {
+		workerPool.Start()
+	} else {
+		go agentLoop.Run(ctx)
+	}
 
 	var configReloadChan <-chan *config.Config
 	stopWatch := func() {}
@@ -262,14 +286,14 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) (runEr
 		select {
 		case <-sigChan:
 			logger.Info("Shutting down...")
-			shutdownGateway(runningServices, agentLoop, provider, true)
+			shutdownGateway(runningServices, provider, true)
 			return nil
 		case newCfg := <-configReloadChan:
 			if !runningServices.reloading.CompareAndSwap(false, true) {
 				logger.Warn("Config reload skipped: another reload is in progress")
 				continue
 			}
-			err := executeReload(ctx, agentLoop, newCfg, &provider, runningServices, msgBus, allowEmptyStartup, debug)
+			err := executeReload(ctx, agentLoop, workerPool, newCfg, &provider, runningServices, msgBus, allowEmptyStartup, debug)
 			if err != nil {
 				logger.Errorf("Config reload failed: %v", err)
 			}
@@ -286,7 +310,7 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) (runEr
 				runningServices.reloading.Store(false)
 				continue
 			}
-			err = executeReload(ctx, agentLoop, newCfg, &provider, runningServices, msgBus, allowEmptyStartup, debug)
+			err = executeReload(ctx, agentLoop, workerPool, newCfg, &provider, runningServices, msgBus, allowEmptyStartup, debug)
 			if err != nil {
 				logger.Errorf("Manual reload failed: %v", err)
 			} else {
@@ -306,6 +330,7 @@ func preCheckConfig(cfg *config.Config) error {
 func executeReload(
 	ctx context.Context,
 	agentLoop *agent.AgentLoop,
+	workerPool *agent.WorkerPool,
 	newCfg *config.Config,
 	provider *providers.LLMProvider,
 	runningServices *services,
@@ -315,7 +340,9 @@ func executeReload(
 ) error {
 	defer runningServices.reloading.Store(false)
 
-	return handleConfigReload(ctx, agentLoop, newCfg, provider, runningServices, msgBus, allowEmptyStartup, debug)
+	overridePicoToken(newCfg, runningServices.authToken)
+
+	return handleConfigReload(ctx, agentLoop, workerPool, newCfg, provider, runningServices, msgBus, allowEmptyStartup, debug)
 }
 
 func createStartupProvider(
@@ -338,6 +365,7 @@ func createStartupProvider(
 func setupAndStartServices(
 	cfg *config.Config,
 	agentLoop *agent.AgentLoop,
+	workerPool *agent.WorkerPool,
 	msgBus *bus.MessageBus,
 	authToken string,
 	listenResult netbind.OpenResult,
@@ -391,12 +419,21 @@ func setupAndStartServices(
 		return nil, fmt.Errorf("error creating channel manager: %w", err)
 	}
 
-	agentLoop.SetChannelManager(runningServices.ChannelManager)
-	agentLoop.SetMediaStore(runningServices.MediaStore)
+	if workerPool != nil {
+		workerPool.SetChannelManager(runningServices.ChannelManager)
+		workerPool.SetMediaStore(runningServices.MediaStore)
+	} else {
+		agentLoop.SetChannelManager(runningServices.ChannelManager)
+		agentLoop.SetMediaStore(runningServices.MediaStore)
+	}
 
 	transcriber := asr.DetectTranscriber(cfg)
 	if transcriber != nil {
-		agentLoop.SetTranscriber(transcriber)
+		if workerPool != nil {
+			workerPool.SetTranscriber(transcriber)
+		} else {
+			agentLoop.SetTranscriber(transcriber)
+		}
 		logger.InfoCF("voice", "Transcription enabled (agent-level)", map[string]any{"provider": transcriber.Name()})
 	}
 
@@ -488,7 +525,6 @@ func stopAndCleanupServices(runningServices *services, shutdownTimeout time.Dura
 
 func shutdownGateway(
 	runningServices *services,
-	agentLoop *agent.AgentLoop,
 	provider providers.LLMProvider,
 	fullShutdown bool,
 ) {
@@ -498,8 +534,13 @@ func shutdownGateway(
 
 	stopAndCleanupServices(runningServices, gracefulShutdownTimeout, false)
 
-	agentLoop.Stop()
-	agentLoop.Close()
+	if runningServices.workerPool != nil {
+		runningServices.workerPool.Stop()
+		runningServices.workerPool.Close()
+	} else if runningServices.agentLoop != nil {
+		runningServices.agentLoop.Stop()
+		runningServices.agentLoop.Close()
+	}
 
 	logger.Info("✓ Gateway stopped")
 }
@@ -507,6 +548,7 @@ func shutdownGateway(
 func handleConfigReload(
 	ctx context.Context,
 	al *agent.AgentLoop,
+	workerPool *agent.WorkerPool,
 	newCfg *config.Config,
 	providerRef *providers.LLMProvider,
 	runningServices *services,
@@ -527,7 +569,7 @@ func handleConfigReload(
 	if err != nil {
 		logger.Errorf("  ⚠ Error creating new provider: %v", err)
 		logger.Warn("  Attempting to restart services with old provider and config...")
-		if restartErr := restartServices(al, runningServices, msgBus); restartErr != nil {
+		if restartErr := restartServices(al, workerPool, runningServices, msgBus); restartErr != nil {
 			logger.Errorf("  ⚠ Failed to restart services: %v", restartErr)
 		}
 		return fmt.Errorf("error creating new provider: %w", err)
@@ -540,22 +582,28 @@ func handleConfigReload(
 	reloadCtx, reloadCancel := context.WithTimeout(context.Background(), providerReloadTimeout)
 	defer reloadCancel()
 
-	if err := al.ReloadProviderAndConfig(reloadCtx, newProvider, newCfg); err != nil {
-		logger.Errorf("  ⚠ Error reloading agent loop: %v", err)
+	var reloadErr error
+	if workerPool != nil {
+		reloadErr = workerPool.ReloadProviderAndConfig(reloadCtx, newProvider, newCfg)
+	} else {
+		reloadErr = al.ReloadProviderAndConfig(reloadCtx, newProvider, newCfg)
+	}
+	if reloadErr != nil {
+		logger.Errorf("  ⚠ Error reloading agent loop: %v", reloadErr)
 		if cp, ok := newProvider.(providers.StatefulProvider); ok {
 			cp.Close()
 		}
 		logger.Warn("  Attempting to restart services with old provider and config...")
-		if restartErr := restartServices(al, runningServices, msgBus); restartErr != nil {
+		if restartErr := restartServices(al, workerPool, runningServices, msgBus); restartErr != nil {
 			logger.Errorf("  ⚠ Failed to restart services: %v", restartErr)
 		}
-		return fmt.Errorf("error reloading agent loop: %w", err)
+		return fmt.Errorf("error reloading agent loop: %w", reloadErr)
 	}
 
 	*providerRef = newProvider
 
 	logger.Info("  Restarting all services with new configuration...")
-	if err := restartServices(al, runningServices, msgBus); err != nil {
+	if err := restartServices(al, workerPool, runningServices, msgBus); err != nil {
 		logger.Errorf("  ⚠ Error restarting services: %v", err)
 		return fmt.Errorf("error restarting services: %w", err)
 	}
@@ -575,6 +623,7 @@ func handleConfigReload(
 
 func restartServices(
 	al *agent.AgentLoop,
+	workerPool *agent.WorkerPool,
 	runningServices *services,
 	msgBus *bus.MessageBus,
 ) error {
@@ -618,9 +667,13 @@ func restartServices(
 	if fms, ok := runningServices.MediaStore.(*media.FileMediaStore); ok {
 		fms.Start()
 	}
-	al.SetMediaStore(runningServices.MediaStore)
-
-	al.SetChannelManager(runningServices.ChannelManager)
+	if workerPool != nil {
+		workerPool.SetMediaStore(runningServices.MediaStore)
+		workerPool.SetChannelManager(runningServices.ChannelManager)
+	} else {
+		al.SetMediaStore(runningServices.MediaStore)
+		al.SetChannelManager(runningServices.ChannelManager)
+	}
 
 	if err = runningServices.ChannelManager.Reload(context.Background(), cfg); err != nil {
 		return fmt.Errorf("error reload channels: %w", err)
@@ -647,7 +700,11 @@ func restartServices(
 	}
 
 	transcriber := asr.DetectTranscriber(cfg)
-	al.SetTranscriber(transcriber)
+	if workerPool != nil {
+		workerPool.SetTranscriber(transcriber)
+	} else {
+		al.SetTranscriber(transcriber)
+	}
 	if transcriber != nil {
 		logger.InfoCF("voice", "Transcription re-enabled (agent-level)", map[string]any{"provider": transcriber.Name()})
 
