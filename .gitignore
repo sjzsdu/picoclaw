@@ -48,6 +48,10 @@ docs/superpowers/
 # Editors
 .vscode/
 .idea/
+.code-context/
+.opencode/
+ai-docs/
+logs/
 
 # Added by goreleaser init:
 dist/

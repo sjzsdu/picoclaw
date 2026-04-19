@@ -192,6 +192,7 @@ type AgentConfig struct {
 	Model     *AgentModelConfig `json:"model,omitempty"`
 	Skills    []string          `json:"skills,omitempty"`
 	Subagents *SubagentsConfig  `json:"subagents,omitempty"`
+	NoHistory bool              `json:"no_history,omitempty"`
 }
 
 type SubagentsConfig struct {
