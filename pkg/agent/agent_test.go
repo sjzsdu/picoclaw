@@ -591,6 +591,133 @@ func TestProcessMessage_BtwCommandUsesIsolatedProvider(t *testing.T) {
 	}
 }
 
+// Test 1: CLI channel bypass routes to default agent
+func TestProcessMessage_CLI_BypassesRoutingAndUsesDefaultAgent(t *testing.T) {
+	tmpDir := t.TempDir()
+	// Configure two agents: an alternate one and the default main agent
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				ModelName:         "test-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+			List: []config.AgentConfig{
+				{ID: "alt", Name: "Alternate"},
+				{ID: "main", Default: true},
+			},
+		},
+	}
+	msgBus := bus.NewMessageBus()
+	provider := &recordingProvider{}
+	al := NewAgentLoop(cfg, msgBus, provider)
+
+	// Prepare a CLI message which would normally be routed elsewhere
+	inbound := testInboundMessage(bus.InboundMessage{
+		Channel:  "cli",
+		ChatID:   "chat-1",
+		SenderID: "cli:1",
+		Content:  "hello",
+	})
+
+	// Resolve route to observe which agent would be chosen
+	route, agent, err := al.resolveMessageRoute(inbound)
+	if err != nil {
+		t.Fatalf("resolveMessageRoute() error = %v", err)
+	}
+	defAgent := al.GetRegistry().GetDefaultAgent()
+	if defAgent == nil {
+		t.Fatal("expected a default agent to exist")
+	}
+	if route.AgentID != defAgent.ID {
+		t.Fatalf("CLI route AgentID = %q, want default agent %q", route.AgentID, defAgent.ID)
+	}
+	if agent == nil || agent.ID != defAgent.ID {
+		t.Fatalf("CLI resolved agent = %v, want default agent %s", agent, defAgent.ID)
+	}
+
+	// Run the processing path
+	resp, err := al.processMessage(context.Background(), inbound)
+	if err != nil {
+		t.Fatalf("processMessage() error = %v", err)
+	}
+	if resp != "Mock response" {
+		t.Fatalf("processMessage() response = %q, want %q", resp, "Mock response")
+	}
+}
+
+// Test 2: Agent with no_history should not persist session history
+func TestProcessMessage_AgentNoHistoryPreventsHistoryPersistence(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				ModelName:         "test-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+			List: []config.AgentConfig{
+				{ID: "main", Default: true, NoHistory: true},
+				{ID: "alt"},
+			},
+		},
+		// Minimal session settings
+		Session: config.SessionConfig{Dimensions: []string{"sender"}},
+	}
+
+	msgBus := bus.NewMessageBus()
+	provider := &recordingProvider{}
+	al := NewAgentLoop(cfg, msgBus, provider)
+
+	// Compute a session key for the main route
+	route, _, err := al.resolveMessageRoute(testInboundMessage(bus.InboundMessage{
+		Channel:  "telegram",
+		ChatID:   "chat-1",
+		SenderID: "user1",
+		Content:  "hello",
+	}))
+	if err != nil {
+		t.Fatalf("resolveMessageRoute() error = %v", err)
+	}
+	allocation := al.allocateRouteSession(route, testInboundMessage(bus.InboundMessage{
+		Channel:  "telegram",
+		ChatID:   "chat-1",
+		SenderID: "user1",
+		Content:  "hello",
+	}))
+	sessionKey := resolveScopeKey(allocation.SessionKey, "")
+
+	defaultAgent := al.GetRegistry().GetDefaultAgent()
+	if defaultAgent == nil {
+		t.Fatal("expected default agent")
+	}
+	initialHistory := []providers.Message{
+		{Role: "user", Content: "We decided to avoid global state."},
+		{Role: "assistant", Content: "Right, keep it request-scoped."},
+	}
+	defaultAgent.Sessions.SetHistory(sessionKey, initialHistory)
+
+	// Process a normal message; with NoHistory = true, history should not be loaded or extended
+	_, err = al.processMessage(context.Background(), testInboundMessage(bus.InboundMessage{
+		Channel:  "telegram",
+		ChatID:   "chat-1",
+		SenderID: "user1",
+		Content:  "how are you?",
+		// Use the same session key by setting it explicitly
+		SessionKey: sessionKey,
+	}))
+	if err != nil {
+		t.Fatalf("processMessage() error = %v", err)
+	}
+
+	history := defaultAgent.Sessions.GetHistory(sessionKey)
+	if !reflect.DeepEqual(history, initialHistory) {
+		t.Fatalf("session history modified: got %#v want %#v", history, initialHistory)
+	}
+}
+
 func TestProcessMessage_BtwCommandRetriesWithoutMediaOnVisionUnsupported(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := &config.Config{

@@ -151,6 +151,17 @@ func (al *AgentLoop) processMessage(ctx context.Context, msg bus.InboundMessage)
 		return "", routeErr
 	}
 
+	// CLI/direct channel messages must bypass routing and use the default agent.
+	// This preserves current-branch route/session conventions while ensuring
+	// command-channel messages (CLI) don't get dispatched to a non-default agent.
+	if msg.Context.Channel == "cli" || msg.Context.Channel == "direct" {
+		if def := al.GetRegistry().GetDefaultAgent(); def != nil {
+			agent = def
+			// Ensure the route snapshot reflects the default agent as well.
+			route.AgentID = def.ID
+		}
+	}
+
 	allocation := al.allocateRouteSession(route, msg)
 
 	// Resolve session key from the route allocation, while preserving explicit
@@ -192,6 +203,7 @@ func (al *AgentLoop) processMessage(ctx context.Context, msg bus.InboundMessage)
 		EnableSummary:           true,
 		SendResponse:            false,
 		AllowInterimPicoPublish: true,
+		NoHistory:               agent.NoHistory,
 	}
 
 	// context-dependent commands check their own Runtime fields and report
