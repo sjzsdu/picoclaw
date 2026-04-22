@@ -958,7 +958,6 @@ func TestAgentLoop_AgentForSession_UsesStoredScopeMetadata(t *testing.T) {
 	key := session.BuildOpaqueSessionKey(alias)
 	scope := &session.SessionScope{
 		Version:    session.ScopeVersionV1,
-		AgentID:    "support",
 		Channel:    "slack",
 		Account:    "default",
 		Dimensions: []string{"chat"},

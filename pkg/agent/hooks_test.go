@@ -447,7 +447,6 @@ func TestAgentLoop_Hooks_ObserverAndLLMInterceptor(t *testing.T) {
 		},
 		SessionScope: &session.SessionScope{
 			Version:    session.ScopeVersionV1,
-			AgentID:    "main",
 			Channel:    "cli",
 			Account:    routing.DefaultAccountID,
 			Dimensions: []string{"sender"},
@@ -537,7 +536,6 @@ func TestAgentLoop_BtwCommand_UsesLLMHooks(t *testing.T) {
 			},
 			SessionScope: &session.SessionScope{
 				Version:    session.ScopeVersionV1,
-				AgentID:    "main",
 				Channel:    "cli",
 				Account:    routing.DefaultAccountID,
 				Dimensions: []string{"sender"},

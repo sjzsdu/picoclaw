@@ -50,9 +50,10 @@ type sessionListItem struct {
 type sessionChatMessage struct {
 	Role             string                  `json:"role"`
 	Content          string                  `json:"content"`
-	Kind             string                  `json:"kind,omitempty"`
-	ReasoningContent string                  `json:"reasoning_content,omitempty"`
 	Media            []string                `json:"media,omitempty"`
+	Kind             string                  `json:"kind,omitempty"`
+	MessageType      string                  `json:"message_type,omitempty"`
+	ReasoningContent string                  `json:"reasoning_content,omitempty"`
 	Attachments      []sessionChatAttachment `json:"attachments,omitempty"`
 }
 
@@ -504,6 +505,7 @@ func sessionTranscriptMessages(
 	includeThoughts bool,
 ) []sessionChatMessage {
 	transcript := make([]sessionChatMessage, 0, len(messages))
+	pendingPicoToolOutput := ""
 
 	for _, msg := range messages {
 		attachments := sessionAttachments(msg)
@@ -513,6 +515,7 @@ func sessionTranscriptMessages(
 			continue
 
 		case "user":
+			pendingPicoToolOutput = ""
 			chatMsg := sessionChatMessage{
 				Role:        "user",
 				Content:     msg.Content,
@@ -541,6 +544,9 @@ func sessionTranscriptMessages(
 			visibleToolMessages := visibleAssistantToolMessages(msg.ToolCalls)
 			if len(visibleToolMessages) > 0 {
 				transcript = append(transcript, visibleToolMessages...)
+				if isPicoSession {
+					pendingPicoToolOutput = visibleToolMessages[len(visibleToolMessages)-1].Content
+				}
 			}
 
 			// When assistant content exactly matches the rendered tool summary or
@@ -553,15 +559,23 @@ func sessionTranscriptMessages(
 				continue
 			}
 
-			// Pico web chat can persist both visible `message` tool output and a
-			// later plain assistant reply in the same turn. Hide only the fixed
-			// internal summary that marks handled tool delivery.
 			content := msg.Content
 			if assistantMessageInternalOnly(msg) {
 				if len(attachments) == 0 {
+					if len(msg.ToolCalls) == 0 {
+						pendingPicoToolOutput = ""
+					}
 					continue
 				}
 				content = ""
+			}
+
+			if pendingPicoToolOutput != "" &&
+				len(msg.Media) == 0 &&
+				len(attachments) == 0 &&
+				strings.TrimSpace(content) == strings.TrimSpace(pendingPicoToolOutput) {
+				pendingPicoToolOutput = ""
+				continue
 			}
 
 			chatMsg := sessionChatMessage{
@@ -575,6 +589,7 @@ func sessionTranscriptMessages(
 			}
 
 			transcript = append(transcript, chatMsg)
+			pendingPicoToolOutput = ""
 		}
 	}
 
@@ -778,6 +793,7 @@ func visibleAssistantToolSummaryMessages(
 				visibleAssistantToolFeedbackExplanation(tc, toolFeedbackMaxArgsLength),
 				visibleAssistantToolArgsPreview(tc, toolFeedbackMaxArgsLength),
 			),
+			MessageType: "tool_feedback",
 		})
 	}
 

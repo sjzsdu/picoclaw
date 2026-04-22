@@ -18,6 +18,7 @@ export interface SessionDetail {
     content: string
     reasoning_content?: string
     kind?: "normal" | "thought"
+    message_type?: "tool_feedback"
     media?: string[]
     attachments?: {
       type?: "image" | "audio" | "video" | "file"

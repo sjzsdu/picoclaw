@@ -139,6 +139,30 @@ function findToolFeedbackMessageIndex(messages: ChatMessage[]): number {
   return -1
 }
 
+function assistantMessageMatchesIncoming(
+  message: {
+    role: "user" | "assistant"
+    content: string
+    kind?: AssistantMessageKind
+    agentId?: string
+    modelName?: string
+  },
+  incoming: {
+    content: string
+    kind: AssistantMessageKind
+    agentId?: string
+    modelName?: string
+  },
+) {
+  return (
+    message.role === "assistant" &&
+    message.content === incoming.content &&
+    (message.kind ?? "normal") === incoming.kind &&
+    (message.agentId ?? "") === (incoming.agentId ?? "") &&
+    (message.modelName ?? "") === (incoming.modelName ?? "")
+  )
+}
+
 export function handlePicoMessage(
   message: PicoMessage,
   expectedSessionId: string,
@@ -157,6 +181,12 @@ export function handlePicoMessage(
       const kind = parseAssistantMessageKind(payload)
       const attachments = parseAttachments(payload)
       const contextUsage = parseContextUsage(payload)
+      const agentId =
+        typeof payload.agent_id === "string" ? payload.agent_id : undefined
+      const modelName =
+        typeof payload.model_name === "string"
+          ? payload.model_name
+          : undefined
       const timestamp =
         message.timestamp !== undefined &&
         Number.isFinite(Number(message.timestamp))
@@ -164,23 +194,34 @@ export function handlePicoMessage(
           : Date.now()
 
       updateChatStore((prev) => ({
-        messages: [
-          ...prev.messages,
-          {
-            id: messageId,
-            role: "assistant",
-            content,
-            kind,
-            attachments,
-            timestamp,
-            agentId:
-              typeof payload.agent_id === "string" ? payload.agent_id : undefined,
-            modelName:
-              typeof payload.model_name === "string"
-                ? payload.model_name
-                : undefined,
-          },
-        ],
+        messages: (() => {
+          const lastMessage = prev.messages.at(-1)
+          if (
+            lastMessage &&
+            assistantMessageMatchesIncoming(lastMessage, {
+              content,
+              kind,
+              agentId,
+              modelName,
+            })
+          ) {
+            return prev.messages
+          }
+
+          return [
+            ...prev.messages,
+            {
+              id: messageId,
+              role: "assistant",
+              content,
+              kind,
+              attachments,
+              timestamp,
+              agentId,
+              modelName,
+            },
+          ]
+        })(),
         isTyping: false,
         ...(contextUsage ? { contextUsage } : {}),
       }))

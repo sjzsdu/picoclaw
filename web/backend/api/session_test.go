@@ -430,7 +430,6 @@ func TestHandleSessions_JSONLScopeDiscovery(t *testing.T) {
 
 	scopeData, err := json.Marshal(session.SessionScope{
 		Version:    session.ScopeVersionV1,
-		AgentID:    "main",
 		Channel:    "pico",
 		Account:    "default",
 		Dimensions: []string{"sender"},
@@ -851,6 +850,69 @@ func TestHandleGetSession_PreservesFinalAssistantReplyAfterMessageToolOutput(t *
 	}
 }
 
+func TestHandleGetSession_DedupesFinalAssistantReplyMatchingMessageToolOutput(t *testing.T) {
+	configPath, cleanup := setupOAuthTestEnv(t)
+	defer cleanup()
+
+	dir := sessionsTestDir(t, configPath)
+	store, err := memory.NewJSONLStore(dir)
+	if err != nil {
+		t.Fatalf("NewJSONLStore() error = %v", err)
+	}
+
+	sessionKey := picoSessionPrefix + "detail-message-tool-duplicate-final-reply"
+	for _, msg := range []providers.Message{
+		{Role: "user", Content: "test"},
+		{
+			Role: "assistant",
+			ToolCalls: []providers.ToolCall{
+				{
+					ID:   "call_1",
+					Type: "function",
+					Function: &providers.FunctionCall{
+						Name:      "message",
+						Arguments: `{"content":"same final answer"}`,
+					},
+				},
+			},
+		},
+		{Role: "tool", Content: "Message sent to pico:pico:detail-message-tool-duplicate-final-reply", ToolCallID: "call_1"},
+		{Role: "assistant", Content: "same final answer"},
+	} {
+		if err := store.AddFullMessage(nil, sessionKey, msg); err != nil {
+			t.Fatalf("AddFullMessage() error = %v", err)
+		}
+	}
+
+	h := NewHandler(configPath)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions/detail-message-tool-duplicate-final-reply", nil)
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	var resp struct {
+		Messages []struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	if len(resp.Messages) != 2 {
+		t.Fatalf("len(resp.Messages) = %d, want 2", len(resp.Messages))
+	}
+	if resp.Messages[1].Role != "assistant" || resp.Messages[1].Content != "same final answer" {
+		t.Fatalf("assistant message = %#v, want deduped same final answer", resp.Messages[1])
+	}
+}
+
 func TestHandleListSessions_MessageCountUsesVisibleTranscript(t *testing.T) {
 	configPath, cleanup := setupOAuthTestEnv(t)
 	defer cleanup()
@@ -1212,6 +1274,26 @@ func TestHandleGetSession_PreservesAttachmentsWhenAssistantToolCallContentDuplic
 	}
 	if resp.Messages[2].Attachments[0].URL != "https://example.com/report.txt" {
 		t.Fatalf("attachment url = %q, want report URL", resp.Messages[2].Attachments[0].URL)
+	}
+}
+
+func TestVisibleAssistantToolSummaryMessages_MarksToolFeedbackMessages(t *testing.T) {
+	messages := visibleAssistantToolSummaryMessages([]providers.ToolCall{
+		{
+			ID:   "call_1",
+			Type: "function",
+			Function: &providers.FunctionCall{
+				Name:      "read_file",
+				Arguments: `{"path":"README.md"}`,
+			},
+		},
+	}, 200)
+
+	if len(messages) != 1 {
+		t.Fatalf("len(messages) = %d, want 1", len(messages))
+	}
+	if messages[0].MessageType != "tool_feedback" {
+		t.Fatalf("message = %#v, want message_type=tool_feedback", messages[0])
 	}
 }
 

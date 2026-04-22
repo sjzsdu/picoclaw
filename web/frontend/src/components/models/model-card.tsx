@@ -6,6 +6,7 @@ import {
   IconStarFilled,
   IconTrash,
 } from "@tabler/icons-react"
+import dayjs from "dayjs"
 import { useTranslation } from "react-i18next"
 
 import type { ModelInfo } from "@/api/models"
@@ -13,6 +14,7 @@ import { Button } from "@/components/ui/button"
 import {
   Tooltip,
   TooltipContent,
+  TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 
@@ -22,6 +24,7 @@ interface ModelCardProps {
   onSetDefault: (model: ModelInfo) => void
   onDelete: (model: ModelInfo) => void
   settingDefault: boolean
+  testingAll?: boolean
 }
 
 export function ModelCard({
@@ -30,13 +33,26 @@ export function ModelCard({
   onSetDefault,
   onDelete,
   settingDefault,
+  testingAll,
 }: ModelCardProps) {
   const { t } = useTranslation()
   const isOAuth = model.auth_method === "oauth"
   const status = model.status
   const statusLabel = t(`models.status.${status}`)
-  const canSetDefault =
-    model.available && !model.is_default && !model.is_virtual
+  const isUsable = model.available
+  const unavailableReason = model.status_reason || statusLabel
+  const canSetDefault = isUsable && !model.is_default && !model.is_virtual
+  const lastTestSummary =
+    model.last_tested_at_unix && model.last_test_status
+      ? `${t(`models.test.persisted.${model.last_test_status}`, {
+          defaultValue: model.last_test_status,
+        })} · ${dayjs.unix(model.last_tested_at_unix).format("MM-DD HH:mm")}`
+      : ""
+  const lastTestDetail = model.last_test_reason || model.last_test_message || ""
+  const lastTestBadgeClass =
+    model.last_test_status === "ok"
+      ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+      : "bg-amber-500/10 text-amber-700 dark:text-amber-400"
 
   const setDefaultLabel = t("models.action.setDefault")
   const setDefaultDisabledReason = (() => {
@@ -69,15 +85,11 @@ export function ModelCard({
           <span
             className={[
               "mt-0.5 h-2 w-2 shrink-0 rounded-full",
-              model.is_default
-                ? "bg-green-400 shadow-[0_0_0_2px_rgba(74,222,128,0.35)]"
-                : status === "available"
-                  ? "bg-green-500"
-                  : status === "unreachable"
-                    ? "bg-amber-500"
-                    : "bg-muted-foreground/25",
+              isUsable
+                ? "bg-green-500 shadow-[0_0_0_2px_rgba(34,197,94,0.18)]"
+                : "bg-amber-500",
             ].join(" ")}
-            title={model.status_reason || statusLabel}
+            title={isUsable ? t("models.reason.available") : unavailableReason}
           />
           <span className="text-foreground truncate text-sm font-semibold">
             {model.model_name}
@@ -194,7 +206,7 @@ export function ModelCard({
           <span className="text-muted-foreground bg-muted rounded px-1.5 py-0.5 text-[10px] font-medium">
             OAuth
           </span>
-        ) : status === "available" && model.api_key ? (
+        ) : isUsable && model.api_key ? (
           <span className="text-muted-foreground/70 flex items-center gap-1 font-mono text-[11px]">
             <IconKey className="size-3" />
             {model.api_key}
@@ -204,7 +216,37 @@ export function ModelCard({
             {statusLabel}
           </span>
         )}
+        {testingAll && !model.is_virtual ? (
+          <IconLoader2 className="text-muted-foreground size-3 animate-spin" />
+        ) : null}
       </div>
+
+      {lastTestSummary && (
+        <div className="flex items-center">
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span
+                  className={[
+                    "w-fit shrink-0 rounded px-1.5 py-0.5 text-[10px] leading-none font-medium",
+                    !isUsable ? "cursor-help" : "",
+                    lastTestBadgeClass,
+                  ].join(" ")}
+                >
+                  {lastTestSummary}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="top" sideOffset={6}>
+                {lastTestDetail
+                  ? `${t("models.test.lastResultPrefix")}${lastTestSummary} · ${lastTestDetail}`
+                  : !isUsable
+                    ? unavailableReason
+                    : `${t("models.test.lastResultPrefix")}${lastTestSummary}`}
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        </div>
+      )}
     </div>
   )
 }

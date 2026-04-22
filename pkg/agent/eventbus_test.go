@@ -155,7 +155,6 @@ func TestAgentLoop_EmitsMinimalTurnEvents(t *testing.T) {
 		},
 		SessionScope: &session.SessionScope{
 			Version:    session.ScopeVersionV1,
-			AgentID:    "main",
 			Channel:    "cli",
 			Account:    routing.DefaultAccountID,
 			Dimensions: []string{"sender"},

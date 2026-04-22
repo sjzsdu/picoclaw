@@ -1316,12 +1316,11 @@ func TestRunAgentLoop_ResponseHandledToolPublishesForUserWhenSendResponseDisable
 		Dispatch: DispatchRequest{
 			SessionKey:  "session-1",
 			UserMessage: "take a screenshot of the screen and send it to me",
-			SessionScope: &session.SessionScope{
-				Version:    session.ScopeVersionV1,
-				AgentID:    defaultAgent.ID,
-				Channel:    "telegram",
-				Dimensions: []string{"chat"},
-				Values: map[string]string{
+				SessionScope: &session.SessionScope{
+					Version:    session.ScopeVersionV1,
+					Channel:    "telegram",
+					Dimensions: []string{"chat"},
+					Values: map[string]string{
 					"chat": "direct:chat1",
 				},
 			},
@@ -1392,12 +1391,11 @@ func TestAppendEventContextFields_IncludesInboundRouteAndScope(t *testing.T) {
 				},
 			},
 		},
-		Scope: &session.SessionScope{
-			Version:    session.ScopeVersionV1,
-			AgentID:    "support",
-			Channel:    "slack",
-			Account:    "workspace-a",
-			Dimensions: []string{"chat", "sender"},
+			Scope: &session.SessionScope{
+				Version:    session.ScopeVersionV1,
+				Channel:    "slack",
+				Account:    "workspace-a",
+				Dimensions: []string{"chat", "sender"},
 			Values: map[string]string{
 				"chat":   "channel:c123",
 				"sender": "u123",
@@ -4246,9 +4244,9 @@ func TestProcessMessage_PublishesToolFeedbackWhenEnabled(t *testing.T) {
 		if outbound.SessionKey == "" {
 			t.Fatal("expected tool feedback to carry session_key")
 		}
-		if outbound.Scope == nil || outbound.Scope.AgentID != "main" || outbound.Scope.Channel != "telegram" {
-			t.Fatalf("expected tool feedback scope, got %+v", outbound.Scope)
-		}
+			if outbound.Scope == nil || outbound.Scope.Channel != "telegram" {
+				t.Fatalf("expected tool feedback scope, got %+v", outbound.Scope)
+			}
 	case <-time.After(2 * time.Second):
 		t.Fatal("expected outbound tool feedback for regular messages")
 	}
@@ -4604,6 +4602,49 @@ func TestProcessMessage_MessageToolPublishesOutboundWithTurnMetadata(t *testing.
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("expected message tool outbound")
+	}
+}
+
+func TestProcessMessage_PicoMessageToolDoesNotFallbackToEmptyResponse(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Agents.Defaults.Workspace = t.TempDir()
+	cfg.Agents.Defaults.ModelName = "test-model"
+	cfg.Agents.Defaults.MaxTokens = 4096
+	cfg.Agents.Defaults.MaxToolIterations = 10
+	cfg.Session.Dimensions = []string{"chat"}
+
+	msgBus := bus.NewMessageBus()
+	provider := &messageToolProvider{}
+	al := NewAgentLoop(cfg, msgBus, provider)
+
+	response, err := al.processMessage(context.Background(), testInboundMessage(bus.InboundMessage{
+		Channel:  "pico",
+		SenderID: "user-1",
+		ChatID:   "session-1",
+		Content:  "send a direct message",
+	}))
+	if err != nil {
+		t.Fatalf("processMessage() error = %v", err)
+	}
+	if response != "" {
+		t.Fatalf("processMessage() response = %q, want empty final response after visible pico tool output", response)
+	}
+
+	select {
+	case outbound := <-msgBus.OutboundChan():
+		if outbound.Content != "direct tool message" {
+			t.Fatalf("outbound content = %q, want direct tool message", outbound.Content)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected pico message tool outbound")
+	}
+
+	select {
+	case outbound := <-msgBus.OutboundChan():
+		if outbound.Content == defaultResponse {
+			t.Fatalf("unexpected empty-response fallback after pico message tool output: %+v", outbound)
+		}
+	case <-time.After(200 * time.Millisecond):
 	}
 }
 

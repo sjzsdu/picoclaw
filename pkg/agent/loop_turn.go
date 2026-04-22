@@ -19,6 +19,39 @@ import (
 	"github.com/sipeed/picoclaw/pkg/utils"
 )
 
+func picoToolDeliveredVisibleOutput(channel, toolName string, toolResult *tools.ToolResult) bool {
+	if channel != "pico" || toolResult == nil || toolResult.IsError {
+		return false
+	}
+
+	// The message tool writes directly to the target chat and reports Silent=true,
+	// so Pico should still consider the turn as having produced visible output.
+	return toolName == "message"
+}
+
+func (al *AgentLoop) picoMessageToolSentToCurrentChat(ts *turnState) bool {
+	if ts == nil || ts.channel != "pico" {
+		return false
+	}
+
+	defaultAgent := al.GetRegistry().GetDefaultAgent()
+	if defaultAgent == nil {
+		return false
+	}
+
+	tool, ok := defaultAgent.Tools.Get("message")
+	if !ok {
+		return false
+	}
+
+	mt, ok := tool.(*tools.MessageTool)
+	if !ok {
+		return false
+	}
+
+	return mt.HasSentTo(ts.sessionKey, ts.channel, ts.chatID)
+}
+
 func (al *AgentLoop) runTurn(ctx context.Context, ts *turnState) (turnResult, error) {
 	turnCtx, turnCancel := context.WithCancel(ctx)
 	defer turnCancel()
@@ -1199,12 +1232,16 @@ turnLoop:
 				}
 			}
 
-			if toolResult == nil {
-				toolResult = tools.ErrorResult("hook returned nil tool result")
-			}
+				if toolResult == nil {
+					toolResult = tools.ErrorResult("hook returned nil tool result")
+				}
 
-			if len(toolResult.Media) > 0 && toolResult.ResponseHandled {
-				parts := make([]bus.MediaPart, 0, len(toolResult.Media))
+				if picoToolDeliveredVisibleOutput(ts.channel, toolName, toolResult) {
+					publishedPicoVisibleOutput = true
+				}
+
+				if len(toolResult.Media) > 0 && toolResult.ResponseHandled {
+					parts := make([]bus.MediaPart, 0, len(toolResult.Media))
 				for _, ref := range toolResult.Media {
 					part := bus.MediaPart{Ref: ref}
 					if al.mediaStore != nil {
@@ -1466,7 +1503,8 @@ turnLoop:
 	}
 
 	if finalContent == "" {
-		if ts.channel == "pico" && (publishedPicoReasoning || publishedPicoVisibleOutput) {
+		if ts.channel == "pico" &&
+			(publishedPicoReasoning || publishedPicoVisibleOutput || al.picoMessageToolSentToCurrentChat(ts)) {
 			ts.setPhase(TurnPhaseCompleted)
 			ts.setFinalContent("")
 			return turnResult{
