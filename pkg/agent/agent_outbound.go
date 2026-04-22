@@ -86,7 +86,7 @@ func (al *AgentLoop) targetReasoningChannelID(channelName string) (chatID string
 	return ""
 }
 
-func (al *AgentLoop) publishPicoReasoning(ctx context.Context, reasoningContent, chatID string) {
+func (al *AgentLoop) publishPicoReasoning(ctx context.Context, reasoningContent, chatID, agentID string) {
 	if reasoningContent == "" || chatID == "" {
 		return
 	}
@@ -107,6 +107,7 @@ func (al *AgentLoop) publishPicoReasoning(ctx context.Context, reasoningContent,
 			},
 		},
 		Content: reasoningContent,
+		AgentID: agentID,
 	}); err != nil {
 		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) ||
 			errors.Is(err, bus.ErrBusClosed) {

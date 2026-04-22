@@ -5,6 +5,7 @@
     "models": "Models",
     "credentials": "Credentials",
     "agent_group": "Agent",
+    "agents": "Agents",
     "hub": "Hub",
     "skills": "Skills",
     "tools": "Tools",
@@ -448,6 +449,61 @@
   "pages": {
     "agent": {
       "load_error": "Failed to load agent support information.",
+      "manage": {
+        "pageDescription": "Create, update, and review launcher agents from one management view.",
+        "loadError": "Failed to load agents",
+        "inherit": "Inherit from defaults",
+        "editDescription": "Update the selected agent basic settings. Agent IDs and names stay immutable here to keep session history and navigation stable.",
+        "saveSuccess": "Agent saved",
+        "saveError": "Failed to save agent",
+        "add": {
+          "button": "Add Agent",
+          "title": "New agent"
+        },
+        "actions": {
+          "edit": "Edit",
+          "delete": "Delete"
+        },
+        "badge": {
+          "main": "Main",
+          "default": "Default"
+        },
+        "form": {
+          "id": "Agent ID",
+          "idHint": "Lowercase letters, numbers, underscores, and dashes only.",
+          "idLocked": "IDs are locked after creation to keep session history and workspaces stable.",
+          "name": "Display name",
+          "nameHint": "Shown in chat selectors and the launcher sidebar.",
+          "model": "Primary model",
+          "modelHint": "Leave blank to inherit the global agent default model.",
+          "workspace": "Workspace override",
+          "workspaceHint": "Optional. Leave blank to use the effective default workspace.",
+          "skills": "Skills",
+          "skillsHint": "Optional. Enter one skill per line or comma separated."
+        },
+        "meta": {
+          "effectiveModel": "Effective model",
+          "effectiveWorkspace": "Effective workspace",
+          "skillCount": "Skills"
+        },
+        "delete": {
+          "title": "Delete agent?",
+          "description": "\"{{name}}\" will be removed from the launcher configuration.",
+          "blocked": "This agent cannot be deleted right now.",
+          "confirm": "Delete",
+          "success": "Agent deleted"
+        },
+        "workspaceFiles": {
+          "button": "Files",
+          "title": "Workspace Files",
+          "files": "Files",
+          "selectFile": "Select a file to edit",
+          "placeholder": "Enter file content...",
+          "empty": "No editable workspace files found.",
+          "saveSuccess": "File saved",
+          "saveError": "Failed to save file"
+        }
+      },
       "skills": {
         "empty": "No skills are currently available.",
         "install_success": "Installed {{name}}.",

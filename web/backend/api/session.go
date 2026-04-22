@@ -48,11 +48,12 @@ type sessionListItem struct {
 }
 
 type sessionChatMessage struct {
-	Role        string                  `json:"role"`
-	Content     string                  `json:"content"`
-	Kind        string                  `json:"kind,omitempty"`
-	Media       []string                `json:"media,omitempty"`
-	Attachments []sessionChatAttachment `json:"attachments,omitempty"`
+	Role             string                  `json:"role"`
+	Content          string                  `json:"content"`
+	Kind             string                  `json:"kind,omitempty"`
+	ReasoningContent string                  `json:"reasoning_content,omitempty"`
+	Media            []string                `json:"media,omitempty"`
+	Attachments      []sessionChatAttachment `json:"attachments,omitempty"`
 }
 
 type sessionChatAttachment struct {
@@ -79,6 +80,13 @@ const (
 func defaultToolFeedbackMaxArgsLength() int {
 	defaults := config.AgentDefaults{}
 	return defaults.GetToolFeedbackMaxArgsLength()
+}
+
+func isPicoSessionKey(key string) bool {
+	if _, ok := extractLegacyPicoSessionID(key); ok {
+		return true
+	}
+	return strings.Contains(key, ":pico:")
 }
 
 // extractLegacyPicoSessionID extracts the session UUID from an old Pico key.
@@ -434,7 +442,7 @@ func buildSessionListItem(sessionID string, sess sessionFile, toolFeedbackMaxArg
 	}
 	title := preview
 
-	return sessionListItem{
+	return sessionListItem {
 		ID:           sessionID,
 		Title:        title,
 		Preview:      preview,
@@ -705,6 +713,18 @@ func sessionAttachmentType(attachment providers.Attachment) string {
 	}
 }
 
+func visibleAssistantThoughtMessage(msg providers.Message) *sessionChatMessage {
+	if strings.TrimSpace(msg.ReasoningContent) == "" {
+		return nil
+	}
+	return &sessionChatMessage{
+		Role:             "assistant",
+		Content:          msg.ReasoningContent,
+		Kind:             "thought",
+		ReasoningContent: msg.ReasoningContent,
+	}
+}
+
 func assistantMessageInternalOnly(msg providers.Message) bool {
 	return strings.TrimSpace(msg.Content) == handledToolResponseSummaryText
 }
@@ -718,9 +738,10 @@ func assistantThoughtMessage(msg providers.Message) (sessionChatMessage, bool) {
 		return sessionChatMessage{}, false
 	}
 	return sessionChatMessage{
-		Role:    "assistant",
-		Content: reasoning,
-		Kind:    "thought",
+		Role:             "assistant",
+		Content:          reasoning,
+		Kind:             "thought",
+		ReasoningContent: reasoning,
 	}, true
 }
 

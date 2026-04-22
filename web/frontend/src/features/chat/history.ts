@@ -45,6 +45,7 @@ export async function loadSessionMessages(
     id: `hist-${index}-${Date.now()}`,
     role: message.role,
     content: message.content,
+    reasoningContent: message.reasoning_content,
     kind:
       message.role === "assistant" ? (message.kind ?? "normal") : undefined,
     attachments: toChatAttachments({

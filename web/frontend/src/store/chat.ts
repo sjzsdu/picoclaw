@@ -22,6 +22,7 @@ export interface ChatMessage {
   role: "user" | "assistant"
   content: string
   timestamp: number | string
+  reasoningContent?: string
   kind?: AssistantMessageKind
   attachments?: ChatAttachment[]
   agentId?: string

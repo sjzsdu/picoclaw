@@ -314,6 +314,7 @@ func (c *PicoChannel) Send(ctx context.Context, msg bus.OutboundMessage) ([]stri
 		PayloadKeyContent: content,
 		PayloadKeyThought: isThought,
 		"message_id":      msgID,
+		"agent_id":        msg.AgentID,
 	}
 	setContextUsagePayload(payload, msg.ContextUsage)
 	outMsg := newMessage(TypeMessageCreate, payload)

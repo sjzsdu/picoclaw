@@ -11,6 +11,14 @@ import (
 
 func (h *Handler) registerAgentRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/agents", h.handleListAgents)
+	mux.HandleFunc("POST /api/agent-configs", h.handleCreateAgentConfig)
+	mux.HandleFunc("GET /api/agent-configs", h.handleListAgentConfigs)
+	mux.HandleFunc("GET /api/agent-configs/{id}", h.handleGetAgentConfig)
+	mux.HandleFunc("PUT /api/agent-configs/{id}", h.handleUpdateAgentConfig)
+	mux.HandleFunc("DELETE /api/agent-configs/{id}", h.handleDeleteAgentConfig)
+	mux.HandleFunc("GET /api/agent-workspace-files", h.handleListAgentWorkspaceFiles)
+	mux.HandleFunc("GET /api/agent-workspace-files/{filename...}", h.handleGetAgentWorkspaceFile)
+	mux.HandleFunc("PUT /api/agent-workspace-files/{filename...}", h.handleUpdateAgentWorkspaceFile)
 }
 
 type agentResponse struct {
@@ -28,7 +36,7 @@ func (h *Handler) handleListAgents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	defaultAgentID := routing.DefaultAgentID
+	defaultAgentID := configuredDefaultAgentID(cfg)
 	agents := buildAgentResponses(cfg, defaultAgentID)
 
 	w.Header().Set("Content-Type", "application/json")
