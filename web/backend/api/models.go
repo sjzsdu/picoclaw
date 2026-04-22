@@ -61,6 +61,13 @@ type modelResponse struct {
 	IsVirtual        bool   `json:"is_virtual"`
 }
 
+type modelConfigRequest struct {
+	config.ModelConfig
+	APIKey       string `json:"api_key"`
+	Index        *int   `json:"index,omitempty"`
+	IncludeTools *bool  `json:"include_tools,omitempty"`
+}
+
 // handleListModels returns all model_list entries with masked API keys.
 //
 //	GET /api/models
@@ -398,7 +405,22 @@ func (h *Handler) handleSetDefaultModel(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
-// maskAPIKey returns a masked version of an API key for safe display.
+func decodeModelConfigRequest(w http.ResponseWriter, r *http.Request) (modelConfigRequest, bool) {
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		http.Error(w, "Failed to read request body", http.StatusBadRequest)
+		return modelConfigRequest{}, false
+	}
+	defer r.Body.Close()
+
+	var mc modelConfigRequest
+	if err = json.Unmarshal(body, &mc); err != nil {
+		http.Error(w, fmt.Sprintf("Invalid JSON: %v", err), http.StatusBadRequest)
+		return modelConfigRequest{}, false
+	}
+	return mc, true
+}
+
 // handleTestModel tests a single model configuration.
 //
 //	POST /api/models/test
