@@ -77,7 +77,7 @@ export function ModelCard({
                     ? "bg-amber-500"
                     : "bg-muted-foreground/25",
             ].join(" ")}
-            title={statusLabel}
+            title={model.status_reason || statusLabel}
           />
           <span className="text-foreground truncate text-sm font-semibold">
             {model.model_name}
