@@ -19,11 +19,17 @@ export interface ModelInfo {
   max_tokens_field?: string
   request_timeout?: number
   thinking_level?: string
+  disable_tools?: boolean
   extra_body?: Record<string, unknown>
   custom_headers?: Record<string, string>
   // Meta
   available: boolean
   status: "available" | "unconfigured" | "unreachable"
+  status_reason?: string
+  last_test_status?: string
+  last_test_reason?: string
+  last_test_message?: string
+  last_tested_at_unix?: number
   is_default: boolean
   is_virtual: boolean
 }

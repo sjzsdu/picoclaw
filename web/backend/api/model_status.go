@@ -41,6 +41,7 @@ const (
 type modelConfigurationSummary struct {
 	Available bool
 	Status    string
+	Reason    string
 }
 
 var (
@@ -106,13 +107,21 @@ func hasModelConfiguration(m *config.ModelConfig) bool {
 
 func modelConfigurationStatus(m *config.ModelConfig) modelConfigurationSummary {
 	if !hasModelConfiguration(m) {
-		return modelConfigurationSummary{Available: false, Status: modelStatusUnconfigured}
+		return modelConfigurationSummary{
+			Available: false,
+			Status:    modelStatusUnconfigured,
+			Reason:    "Missing API key or OAuth credential.",
+		}
 	}
 	if requiresRuntimeProbe(m) {
 		if probeLocalModelAvailability(m) {
 			return modelConfigurationSummary{Available: true, Status: modelStatusAvailable}
 		}
-		return modelConfigurationSummary{Available: false, Status: modelStatusUnreachable}
+		return modelConfigurationSummary{
+			Available: false,
+			Status:    modelStatusUnreachable,
+			Reason:    "Health check failed or the target service is unreachable.",
+		}
 	}
 	return modelConfigurationSummary{Available: true, Status: modelStatusAvailable}
 }

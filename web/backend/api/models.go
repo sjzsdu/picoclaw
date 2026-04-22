@@ -41,14 +41,20 @@ type modelResponse struct {
 	MaxTokensField string            `json:"max_tokens_field,omitempty"`
 	RequestTimeout int               `json:"request_timeout,omitempty"`
 	ThinkingLevel  string            `json:"thinking_level,omitempty"`
+	DisableTools   bool              `json:"disable_tools,omitempty"`
 	ExtraBody      map[string]any    `json:"extra_body,omitempty"`
 	CustomHeaders  map[string]string `json:"custom_headers,omitempty"`
 	// Meta
-	Enabled   bool   `json:"enabled"`
-	Available bool   `json:"available"`
-	Status    string `json:"status"`
-	IsDefault bool   `json:"is_default"`
-	IsVirtual bool   `json:"is_virtual"`
+	Enabled          bool   `json:"enabled"`
+	Available        bool   `json:"available"`
+	Status           string `json:"status"`
+	Reason           string `json:"status_reason,omitempty"`
+	LastTestStatus   string `json:"last_test_status,omitempty"`
+	LastTestReason   string `json:"last_test_reason,omitempty"`
+	LastTestMessage  string `json:"last_test_message,omitempty"`
+	LastTestedAtUnix int64  `json:"last_tested_at_unix,omitempty"`
+	IsDefault        bool   `json:"is_default"`
+	IsVirtual        bool   `json:"is_virtual"`
 }
 
 // handleListModels returns all model_list entries with masked API keys.
@@ -78,27 +84,33 @@ func (h *Handler) handleListModels(w http.ResponseWriter, r *http.Request) {
 	for i, m := range cfg.ModelList {
 		provider, modelID := providers.ExtractProtocol(m)
 		models = append(models, modelResponse{
-			Index:          i,
-			ModelName:      m.ModelName,
-			Provider:       provider,
-			Model:          modelID,
-			APIBase:        m.APIBase,
-			APIKey:         maskAPIKey(m.APIKey()),
-			Proxy:          m.Proxy,
-			AuthMethod:     m.AuthMethod,
-			ConnectMode:    m.ConnectMode,
-			Workspace:      m.Workspace,
-			RPM:            m.RPM,
-			MaxTokensField: m.MaxTokensField,
-			RequestTimeout: m.RequestTimeout,
-			ThinkingLevel:  m.ThinkingLevel,
-			ExtraBody:      m.ExtraBody,
-			CustomHeaders:  m.CustomHeaders,
-			Enabled:        m.Enabled,
-			Available:      modelStatuses[i].Available,
-			Status:         modelStatuses[i].Status,
-			IsDefault:      m.ModelName == defaultModel,
-			IsVirtual:      m.IsVirtual(),
+			Index:            i,
+			ModelName:        m.ModelName,
+			Provider:         provider,
+			Model:            modelID,
+			APIBase:          m.APIBase,
+			APIKey:           maskAPIKey(m.APIKey()),
+			Proxy:            m.Proxy,
+			AuthMethod:       m.AuthMethod,
+			ConnectMode:      m.ConnectMode,
+			Workspace:        m.Workspace,
+			RPM:              m.RPM,
+			MaxTokensField:   m.MaxTokensField,
+			RequestTimeout:   m.RequestTimeout,
+			ThinkingLevel:    m.ThinkingLevel,
+			DisableTools:     m.DisableTools,
+			ExtraBody:        m.ExtraBody,
+			CustomHeaders:    m.CustomHeaders,
+			Enabled:          m.Enabled,
+			Available:        modelStatuses[i].Available,
+			Status:           modelStatuses[i].Status,
+			Reason:           modelStatuses[i].Reason,
+			LastTestStatus:   m.LastTestStatus,
+			LastTestReason:   m.LastTestReason,
+			LastTestMessage:  m.LastTestMessage,
+			LastTestedAtUnix: m.LastTestedAtUnix,
+			IsDefault:        m.ModelName == defaultModel,
+			IsVirtual:        m.IsVirtual(),
 		})
 	}
 
