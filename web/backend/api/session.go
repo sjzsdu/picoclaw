@@ -214,6 +214,10 @@ type picoLegacySessionRef struct {
 	Path string
 }
 
+type sessionLocator struct {
+	Dir string
+}
+
 func extractPicoSessionIDFromScope(scope session.SessionScope) (string, bool) {
 	if !strings.EqualFold(strings.TrimSpace(scope.Channel), "pico") {
 		return "", false
@@ -889,48 +893,103 @@ func resolveSessionsDir(workspace string) string {
 	return filepath.Join(workspace, "sessions")
 }
 
+func resolveAgentWorkspace(agentCfg *config.AgentConfig, defaults *config.AgentDefaults) string {
+	if agentCfg != nil && strings.TrimSpace(agentCfg.Workspace) != "" {
+		return strings.TrimSpace(agentCfg.Workspace)
+	}
+	defaultWorkspace := defaults.Workspace
+	if strings.TrimSpace(defaultWorkspace) == "" {
+		home, _ := os.UserHomeDir()
+		defaultWorkspace = filepath.Join(home, ".picoclaw", "workspace")
+	}
+	if agentCfg == nil || agentCfg.Default || agentCfg.ID == "" || routing.NormalizeAgentID(agentCfg.ID) == routing.DefaultAgentID {
+		return defaultWorkspace
+	}
+	return filepath.Join(defaultWorkspace, "..", routing.NormalizeAgentID(agentCfg.ID))
+}
+
+func (h *Handler) sessionDirs() ([]string, error) {
+	cfg, err := config.LoadConfig(h.configPath)
+	if err != nil {
+		return nil, err
+	}
+
+	seen := make(map[string]struct{})
+	dirs := make([]string, 0, len(cfg.Agents.List)+1)
+	appendDir := func(workspace string) {
+		dir := resolveSessionsDir(workspace)
+		if _, exists := seen[dir]; exists {
+			return
+		}
+		seen[dir] = struct{}{}
+		dirs = append(dirs, dir)
+	}
+
+	appendDir(resolveAgentWorkspace(nil, &cfg.Agents.Defaults))
+	for i := range cfg.Agents.List {
+		appendDir(resolveAgentWorkspace(&cfg.Agents.List[i], &cfg.Agents.Defaults))
+	}
+
+	return dirs, nil
+}
+
+func (h *Handler) locateSessionAcrossDirs(dirs []string, sessionID string) (sessionLocator, error) {
+	for _, dir := range dirs {
+		if _, err := h.findPicoJSONLSession(dir, sessionID); err == nil {
+			return sessionLocator{Dir: dir}, nil
+		}
+		if _, err := h.findLegacyPicoSession(dir, sessionID); err == nil {
+			return sessionLocator{Dir: dir}, nil
+		}
+	}
+	return sessionLocator{}, os.ErrNotExist
+}
+
 // handleListSessions returns a list of Pico session summaries.
 //
 //	GET /api/sessions
 func (h *Handler) handleListSessions(w http.ResponseWriter, r *http.Request) {
-	dir, toolFeedbackMaxArgsLength, err := h.sessionRuntimeSettings()
+	_, toolFeedbackMaxArgsLength, err := h.sessionRuntimeSettings()
 	if err != nil {
 		http.Error(w, "failed to resolve sessions directory", http.StatusInternalServerError)
 		return
 	}
-
-	if _, err := os.ReadDir(dir); err != nil {
-		// Directory doesn't exist yet = no sessions
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode([]sessionListItem{})
+	dirs, err := h.sessionDirs()
+	if err != nil {
+		http.Error(w, "failed to resolve sessions directory", http.StatusInternalServerError)
 		return
 	}
 
 	items := []sessionListItem{}
 	seen := make(map[string]struct{})
 
-	if refs, findErr := h.findPicoJSONLSessions(dir); findErr == nil {
-		for _, ref := range refs {
-			sess, loadErr := h.readJSONLSession(dir, ref.Key)
-			if loadErr != nil || isEmptySession(sess) {
-				continue
+	for _, dir := range dirs {
+		if refs, findErr := h.findPicoJSONLSessions(dir); findErr == nil {
+			for _, ref := range refs {
+				if _, exists := seen[ref.ID]; exists {
+					continue
+				}
+				sess, loadErr := h.readJSONLSession(dir, ref.Key)
+				if loadErr != nil || isEmptySession(sess) {
+					continue
+				}
+				seen[ref.ID] = struct{}{}
+				items = append(items, buildSessionListItem(ref.ID, sess, toolFeedbackMaxArgsLength))
 			}
-			seen[ref.ID] = struct{}{}
-			items = append(items, buildSessionListItem(ref.ID, sess, toolFeedbackMaxArgsLength))
 		}
-	}
 
-	if legacyRefs, findErr := h.findLegacyPicoSessions(dir); findErr == nil {
-		for _, ref := range legacyRefs {
-			if _, exists := seen[ref.ID]; exists {
-				continue
+		if legacyRefs, findErr := h.findLegacyPicoSessions(dir); findErr == nil {
+			for _, ref := range legacyRefs {
+				if _, exists := seen[ref.ID]; exists {
+					continue
+				}
+				sess, loadErr := h.readLegacySession(ref.Path)
+				if loadErr != nil || isEmptySession(sess) {
+					continue
+				}
+				seen[ref.ID] = struct{}{}
+				items = append(items, buildSessionListItem(ref.ID, sess, toolFeedbackMaxArgsLength))
 			}
-			sess, loadErr := h.readLegacySession(ref.Path)
-			if loadErr != nil || isEmptySession(sess) {
-				continue
-			}
-			seen[ref.ID] = struct{}{}
-			items = append(items, buildSessionListItem(ref.ID, sess, toolFeedbackMaxArgsLength))
 		}
 	}
 
@@ -979,24 +1038,34 @@ func (h *Handler) handleGetSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	dir, toolFeedbackMaxArgsLength, err := h.sessionRuntimeSettings()
+	_, toolFeedbackMaxArgsLength, err := h.sessionRuntimeSettings()
 	if err != nil {
 		http.Error(w, "failed to resolve sessions directory", http.StatusInternalServerError)
 		return
 	}
+	dirs, err := h.sessionDirs()
+	if err != nil {
+		http.Error(w, "failed to resolve sessions directory", http.StatusInternalServerError)
+		return
+	}
+	locator, err := h.locateSessionAcrossDirs(dirs, sessionID)
+	if err != nil {
+		http.Error(w, "session not found", http.StatusNotFound)
+		return
+	}
 
-	ref, refErr := h.findPicoJSONLSession(dir, sessionID)
+	ref, refErr := h.findPicoJSONLSession(locator.Dir, sessionID)
 	var sess sessionFile
 	err = refErr
 	if refErr == nil {
-		sess, err = h.readJSONLSession(dir, ref.Key)
+		sess, err = h.readJSONLSession(locator.Dir, ref.Key)
 	}
 	if err == nil && isEmptySession(sess) {
 		err = os.ErrNotExist
 	}
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			if legacyRef, legacyErr := h.findLegacyPicoSession(dir, sessionID); legacyErr == nil {
+			if legacyRef, legacyErr := h.findLegacyPicoSession(locator.Dir, sessionID); legacyErr == nil {
 				sess, err = h.readLegacySession(legacyRef.Path)
 			}
 			if err == nil && isEmptySession(sess) {
@@ -1035,15 +1104,20 @@ func (h *Handler) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	dir, err := h.sessionsDir()
+	dirs, err := h.sessionDirs()
 	if err != nil {
 		http.Error(w, "failed to resolve sessions directory", http.StatusInternalServerError)
 		return
 	}
+	locator, err := h.locateSessionAcrossDirs(dirs, sessionID)
+	if err != nil {
+		http.Error(w, "session not found", http.StatusNotFound)
+		return
+	}
 
 	removed := false
-	if ref, err := h.findPicoJSONLSession(dir, sessionID); err == nil {
-		base := filepath.Join(dir, sanitizeSessionKey(ref.Key))
+	if ref, err := h.findPicoJSONLSession(locator.Dir, sessionID); err == nil {
+		base := filepath.Join(locator.Dir, sanitizeSessionKey(ref.Key))
 		for _, path := range []string{base + ".jsonl", base + ".meta.json"} {
 			if err := os.Remove(path); err != nil {
 				if os.IsNotExist(err) {
@@ -1056,7 +1130,7 @@ func (h *Handler) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if legacyRef, err := h.findLegacyPicoSession(dir, sessionID); err == nil {
+	if legacyRef, err := h.findLegacyPicoSession(locator.Dir, sessionID); err == nil {
 		if err := os.Remove(legacyRef.Path); err != nil {
 			if !os.IsNotExist(err) {
 				http.Error(w, "failed to delete session", http.StatusInternalServerError)

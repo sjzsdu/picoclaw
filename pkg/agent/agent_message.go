@@ -93,12 +93,13 @@ func (al *AgentLoop) ProcessHeartbeat(
 		}
 	}
 	return al.runAgentLoop(ctx, agent, processOptions{
-		Dispatch:             dispatch,
-		DefaultResponse:      defaultResponse,
-		EnableSummary:        false,
-		SendResponse:         false,
-		SuppressToolFeedback: true,
-		NoHistory:            true, // Don't load session history for heartbeat
+		Dispatch:               dispatch,
+		DefaultResponse:        defaultResponse,
+		EnableSummary:          false,
+		SendResponse:           false,
+		SuppressToolFeedback:   true,
+		NoHistory:              true, // Don't load session history for heartbeat
+		SkipSessionPersistence: true,
 	})
 }
 

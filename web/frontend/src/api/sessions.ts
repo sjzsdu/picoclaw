@@ -7,6 +7,8 @@ export interface SessionSummary {
   message_count: number
   created: string
   updated: string
+  session_id?: string
+  agent_id?: string
 }
 
 export interface SessionDetail {

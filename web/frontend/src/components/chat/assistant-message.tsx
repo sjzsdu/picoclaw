@@ -24,6 +24,9 @@ interface AssistantMessageProps {
   attachments?: ChatAttachment[]
   isThought?: boolean
   timestamp?: string | number
+  agentId?: string
+  agentName?: string
+  modelName?: string
 }
 
 export function AssistantMessage({
@@ -31,19 +34,23 @@ export function AssistantMessage({
   attachments = [],
   isThought = false,
   timestamp = "",
+  agentId,
+  agentName,
+  modelName,
 }: AssistantMessageProps) {
   const { t } = useTranslation()
   const [isCopied, setIsCopied] = useState(false)
+  const [isThoughtExpanded, setIsThoughtExpanded] = useState(false)
   const hasText = content.trim().length > 0
+  const formattedTimestamp =
+    timestamp !== "" ? formatMessageTime(timestamp) : ""
+  const senderLabel = [agentName || agentId, modelName].filter(Boolean).join(" · ")
   const imageAttachments = attachments.filter(
     (attachment) => attachment.type === "image",
   )
   const fileAttachments = attachments.filter(
     (attachment) => attachment.type !== "image",
   )
-  const [isExpanded, setIsExpanded] = useState(true)
-  const formattedTimestamp =
-    timestamp !== "" ? formatMessageTime(timestamp) : ""
 
   const handleCopy = () => {
     navigator.clipboard.writeText(content).then(() => {
@@ -54,52 +61,70 @@ export function AssistantMessage({
 
   return (
     <div className="group flex w-full flex-col gap-1.5">
-      {!isThought && (
-        <div className="text-muted-foreground/60 flex items-center justify-between gap-2 px-1 text-xs opacity-70">
-          <div className="flex items-center gap-2">
-            <span>PicoClaw</span>
-            {formattedTimestamp && (
-              <>
-                <span className="opacity-50">•</span>
-                <span>{formattedTimestamp}</span>
-              </>
-            )}
-          </div>
+      <div className="text-muted-foreground flex items-center justify-between gap-2 px-1 text-xs opacity-70">
+        <div className="flex items-center gap-2">
+          <span>{senderLabel || "PicoClaw"}</span>
+          {isThought && (
+            <span className="inline-flex items-center gap-1 rounded-full border border-amber-300/80 bg-amber-100/80 px-2 py-0.5 text-[11px] font-medium text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-200">
+              <IconBrain className="size-3" />
+              <span>{t("chat.reasoningLabel")}</span>
+            </span>
+          )}
+          {formattedTimestamp && (
+            <>
+              <span className="opacity-50">•</span>
+              <span>{formattedTimestamp}</span>
+            </>
+          )}
         </div>
-      )}
+      </div>
 
       {(hasText || isThought) && (
         <div
           className={cn(
             "relative overflow-hidden rounded-xl border",
             isThought
-              ? "border-border/30 bg-muted/20 text-muted-foreground dark:border-border/20 dark:bg-muted/10"
-              : "bg-card text-card-foreground border-border/60",
+              ? "border-amber-200/90 bg-amber-50/70 text-amber-950 dark:border-amber-500/35 dark:bg-amber-500/10 dark:text-amber-100"
+              : "border-border/60 bg-card text-card-foreground",
           )}
         >
           {isThought && (
-            <div
-              className="text-muted-foreground/60 hover:text-muted-foreground/80 flex cursor-pointer items-center justify-between px-3 py-2 text-[12px] font-medium transition-colors select-none"
-              onClick={() => setIsExpanded(!isExpanded)}
+            <button
+              type="button"
+              className="text-muted-foreground hover:text-foreground flex w-full items-center justify-between border-b border-amber-200/70 bg-amber-100/40 px-3 py-2.5 text-left text-xs dark:border-amber-500/20 dark:bg-amber-500/5"
+              onClick={() => setIsThoughtExpanded((value) => !value)}
             >
-              <div className="flex items-center gap-1.5">
-                <IconBrain className="size-3.5" />
-                <span>{t("chat.reasoningLabel")}</span>
+              <div className="flex min-w-0 items-center gap-2">
+                <IconBrain className="size-3.5 shrink-0" />
+                <div className="min-w-0">
+                  <div className="font-medium text-amber-900 dark:text-amber-100">
+                    {t("chat.reasoningLabel")}
+                  </div>
+                  <div className="truncate text-[10px] opacity-70">
+                    {isThoughtExpanded
+                      ? "Internal reasoning details"
+                      : "Preview hidden by default — expand to inspect"}
+                  </div>
+                </div>
               </div>
-              <IconChevronDown
-                className={cn(
-                  "size-3.5 opacity-0 transition-all duration-200 group-hover:opacity-100",
-                  isExpanded ? "rotate-180" : "",
-                )}
-              />
-            </div>
+              <span className="flex items-center gap-1 text-[10px] font-medium opacity-80">
+                <span>{isThoughtExpanded ? "Hide" : "Expand"}</span>
+                <IconChevronDown
+                  className={cn(
+                    "size-3 transition-transform",
+                    isThoughtExpanded ? "rotate-180" : "rotate-0",
+                  )}
+                />
+              </span>
+            </button>
           )}
-          {(!isThought || isExpanded) && hasText && (
+
+          {(!isThought || isThoughtExpanded) && hasText && (
             <div
               className={cn(
-                "prose dark:prose-invert prose-pre:my-2 prose-pre:overflow-x-auto prose-pre:rounded-lg prose-pre:border prose-pre:bg-zinc-100 prose-pre:p-0 prose-pre:text-zinc-900 dark:prose-pre:bg-zinc-950 dark:prose-pre:text-zinc-100 max-w-none [overflow-wrap:anywhere] break-words",
+                "prose dark:prose-invert prose-pre:my-2 prose-pre:overflow-x-auto prose-pre:rounded-lg prose-pre:border prose-pre:bg-zinc-100 prose-pre:p-0 prose-pre:text-zinc-900 max-w-none [overflow-wrap:anywhere] break-words dark:prose-pre:bg-zinc-950 dark:prose-pre:text-zinc-100",
                 isThought
-                  ? "prose-p:my-1.5 prose-p:whitespace-pre-wrap px-3 pt-0 pb-3 text-[13px] leading-relaxed opacity-70"
+                  ? "prose-p:my-1.5 prose-p:whitespace-pre-wrap p-3 text-[13px] leading-relaxed text-amber-950/90 dark:text-amber-50/90"
                   : "prose-p:my-2 prose-p:whitespace-pre-wrap p-4 text-[15px] leading-relaxed",
               )}
             >
@@ -112,22 +137,27 @@ export function AssistantMessage({
             </div>
           )}
 
-          {!isThought && hasText && (
-            <Button
-              variant="ghost"
-              size="icon"
-              className={cn(
-                "bg-background/50 hover:bg-background/80 absolute top-2 right-2 h-7 w-7 opacity-0 transition-opacity group-hover:opacity-100",
-              )}
-              onClick={handleCopy}
-            >
-              {isCopied ? (
-                <IconCheck className="h-4 w-4 text-green-500" />
-              ) : (
-                <IconCopy className="text-muted-foreground h-4 w-4" />
-              )}
-            </Button>
+          {isThought && !isThoughtExpanded && (
+            <div className="pointer-events-none absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-amber-50 via-amber-50/95 to-transparent dark:from-amber-500/10 dark:via-amber-500/5" />
           )}
+
+          <Button
+            variant="ghost"
+            size="icon"
+            className={cn(
+              "absolute top-2 right-2 h-7 w-7 opacity-0 transition-opacity group-hover:opacity-100",
+              isThought
+                ? "bg-amber-100/70 hover:bg-amber-200/80 dark:bg-amber-500/20 dark:hover:bg-amber-400/30"
+                : "bg-background/50 hover:bg-background/80",
+            )}
+            onClick={handleCopy}
+          >
+            {isCopied ? (
+              <IconCheck className="h-4 w-4 text-green-500" />
+            ) : (
+              <IconCopy className="text-muted-foreground h-4 w-4" />
+            )}
+          </Button>
         </div>
       )}
 

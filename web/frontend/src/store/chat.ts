@@ -15,6 +15,8 @@ export interface ChatAttachment {
 
 export type AssistantMessageKind = "normal" | "thought"
 
+export type MessageDeliveryStatus = "sending" | "sent" | "delivered" | "failed"
+
 export interface ChatMessage {
   id: string
   role: "user" | "assistant"
@@ -22,6 +24,10 @@ export interface ChatMessage {
   timestamp: number | string
   kind?: AssistantMessageKind
   attachments?: ChatAttachment[]
+  agentId?: string
+  modelName?: string
+  deliveryStatus?: MessageDeliveryStatus
+  isStreaming?: boolean
 }
 
 export interface ContextUsage {

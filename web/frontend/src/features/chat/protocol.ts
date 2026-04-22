@@ -9,6 +9,25 @@ import {
   updateChatStore,
 } from "@/store/chat"
 
+export const CHAT_SESSION_ACTIVITY_EVENT = "picoclaw:chat-session-activity"
+
+export interface ChatSessionActivityDetail {
+  sessionId: string
+  preview?: string
+  timestamp?: string
+}
+
+export function notifySessionActivity(detail: ChatSessionActivityDetail) {
+  if (!detail.sessionId) {
+    return
+  }
+  globalThis.window?.dispatchEvent(
+    new CustomEvent(CHAT_SESSION_ACTIVITY_EVENT, {
+      detail,
+    }),
+  )
+}
+
 export interface PicoMessage {
   type: string
   id?: string
@@ -154,11 +173,18 @@ export function handlePicoMessage(
             kind,
             attachments,
             timestamp,
+            agentId:
+              typeof payload.agent_id === "string" ? payload.agent_id : undefined,
+            modelName:
+              typeof payload.model_name === "string"
+                ? payload.model_name
+                : undefined,
           },
         ],
         isTyping: false,
         ...(contextUsage ? { contextUsage } : {}),
       }))
+      notifySessionActivity({ sessionId: expectedSessionId, preview: content })
       break
     }
 
@@ -190,6 +216,14 @@ export function handlePicoMessage(
               ...msg,
               id: messageId,
               content,
+              agentId:
+                typeof payload.agent_id === "string"
+                  ? payload.agent_id
+                  : msg.agentId,
+              modelName:
+                typeof payload.model_name === "string"
+                  ? payload.model_name
+                  : msg.modelName,
               ...(hasKind ? { kind } : {}),
               ...(attachments ? { attachments } : {}),
             }
@@ -206,6 +240,14 @@ export function handlePicoMessage(
                     ...msg,
                     id: messageId,
                     content,
+                    agentId:
+                      typeof payload.agent_id === "string"
+                        ? payload.agent_id
+                        : msg.agentId,
+                    modelName:
+                      typeof payload.model_name === "string"
+                        ? payload.model_name
+                        : msg.modelName,
                     ...(hasKind ? { kind } : {}),
                     ...(attachments ? { attachments } : {}),
                   }
@@ -219,6 +261,14 @@ export function handlePicoMessage(
               id: messageId,
               role: "assistant" as const,
               content,
+              agentId:
+                typeof payload.agent_id === "string"
+                  ? payload.agent_id
+                  : undefined,
+              modelName:
+                typeof payload.model_name === "string"
+                  ? payload.model_name
+                  : undefined,
               ...(hasKind ? { kind } : {}),
               ...(attachments ? { attachments } : {}),
               timestamp,
@@ -227,6 +277,7 @@ export function handlePicoMessage(
         })(),
         ...(contextUsage ? { contextUsage } : {}),
       }))
+      notifySessionActivity({ sessionId: expectedSessionId, preview: content })
       break
     }
 
@@ -251,11 +302,13 @@ export function handlePicoMessage(
           return prev.messages.filter((_, index) => index !== fallbackIndex)
         })(),
       }))
+      notifySessionActivity({ sessionId: expectedSessionId, preview: content })
       break
     }
 
     case "typing.start":
       updateChatStore({ isTyping: true })
+      notifySessionActivity({ sessionId: expectedSessionId })
       break
 
     case "typing.stop":

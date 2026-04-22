@@ -2,6 +2,10 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 
 import { type SessionSummary, deleteSession, getSessions } from "@/api/sessions"
+import {
+  CHAT_SESSION_ACTIVITY_EVENT,
+  type ChatSessionActivityDetail,
+} from "@/features/chat/protocol"
 
 const LIMIT = 20
 
@@ -21,6 +25,42 @@ export function useSessionHistory({
   const [hasMore, setHasMore] = useState(true)
   const [isLoadingMore, setIsLoadingMore] = useState(false)
   const [loadError, setLoadError] = useState(false)
+
+  const applyOptimisticSessionActivity = useCallback(
+    (detail: ChatSessionActivityDetail) => {
+      const sessionId = detail.sessionId.trim()
+      if (!sessionId) {
+        return
+      }
+      const updated = detail.timestamp ?? new Date().toISOString()
+      const preview = (detail.preview?.trim() || "(new chat)").slice(0, 60)
+
+      setSessions((prev) => {
+        const existing = prev.find((session) => session.id === sessionId)
+        const rest = prev.filter((session) => session.id !== sessionId)
+        const next: SessionSummary = existing
+          ? {
+              ...existing,
+              preview: existing.preview || preview,
+              title:
+                existing.title && existing.title !== "(empty)"
+                  ? existing.title
+                  : preview,
+              updated,
+            }
+          : {
+              id: sessionId,
+              title: preview,
+              preview,
+              message_count: 1,
+              created: updated,
+              updated,
+            }
+        return [next, ...rest]
+      })
+    },
+    [],
+  )
 
   const loadSessions = useCallback(
     async (reset = true) => {
@@ -85,11 +125,44 @@ export function useSessionHistory({
     return () => observer.disconnect()
   }, [hasMore, isLoadingMore, loadError, loadSessions])
 
+  useEffect(() => {
+    let refreshTimer: number | null = null
+
+    const handleSessionActivity = (event: Event) => {
+      const detail = (event as CustomEvent<ChatSessionActivityDetail>).detail
+      if (detail?.sessionId) {
+        applyOptimisticSessionActivity(detail)
+      }
+      if (refreshTimer !== null) {
+        window.clearTimeout(refreshTimer)
+      }
+      refreshTimer = window.setTimeout(() => {
+        void loadSessions(true)
+      }, 300)
+    }
+
+    window.addEventListener(
+      CHAT_SESSION_ACTIVITY_EVENT,
+      handleSessionActivity as EventListener,
+    )
+
+    return () => {
+      if (refreshTimer !== null) {
+        window.clearTimeout(refreshTimer)
+      }
+      window.removeEventListener(
+        CHAT_SESSION_ACTIVITY_EVENT,
+        handleSessionActivity as EventListener,
+      )
+    }
+  }, [applyOptimisticSessionActivity, loadSessions])
+
   const handleDeleteSession = useCallback(
-    async (id: string) => {
+    async (session: SessionSummary) => {
+      const id = session.id
       try {
         const deletedLoadedSession = sessions.some(
-          (session) => session.id === id,
+          (s) => s.id === id,
         )
         await deleteSession(id)
         setSessions((prev) => prev.filter((s) => s.id !== id))

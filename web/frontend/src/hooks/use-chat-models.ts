@@ -4,6 +4,7 @@ import { type ModelInfo, getModels, setDefaultModel } from "@/api/models"
 
 interface UseChatModelsOptions {
   isConnected: boolean
+  activeSessionId?: string
 }
 
 function isLocalModel(model: ModelInfo): boolean {
@@ -17,7 +18,10 @@ function isLocalModel(model: ModelInfo): boolean {
   )
 }
 
-export function useChatModels({ isConnected }: UseChatModelsOptions) {
+export function useChatModels({
+  isConnected,
+  activeSessionId,
+}: UseChatModelsOptions) {
   const [modelList, setModelList] = useState<ModelInfo[]>([])
   const [defaultModelName, setDefaultModelName] = useState("")
   const setDefaultRequestIdRef = useRef(0)
@@ -40,7 +44,7 @@ export function useChatModels({ isConnected }: UseChatModelsOptions) {
     }, 0)
 
     return () => clearTimeout(timerId)
-  }, [isConnected, loadModels])
+  }, [isConnected, activeSessionId, loadModels])
 
   const handleSetDefault = useCallback(
     async (modelName: string) => {

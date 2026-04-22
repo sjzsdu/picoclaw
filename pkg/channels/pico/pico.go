@@ -923,11 +923,15 @@ func (c *PicoChannel) handleMessageSend(pc *picoConn, msg PicoMessage) {
 		"session_id": sessionID,
 		"conn_id":    pc.id,
 	}
+	if requestedAgentID, _ := msg.Payload["agent_id"].(string); strings.TrimSpace(requestedAgentID) != "" {
+		metadata["agent_id"] = strings.TrimSpace(requestedAgentID)
+	}
 
 	logger.DebugCF("pico", "Received message", map[string]any{
 		"session_id": sessionID,
 		"preview":    truncate(content, 50),
 		"media":      len(media),
+		"agent_id":   metadata["agent_id"],
 	})
 
 	sender := bus.SenderInfo{
