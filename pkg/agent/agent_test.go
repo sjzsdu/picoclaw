@@ -4022,6 +4022,105 @@ func TestProcessMessage_PicoPublishesReasoningAsThoughtMessage(t *testing.T) {
 	}
 }
 
+func TestProcessMessage_PicoReasoningOnlyDoesNotFallbackToEmptyResponseError(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				ModelName:         "test-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+		},
+	}
+
+	msgBus := bus.NewMessageBus()
+	provider := &reasoningContentProvider{
+		response:         "",
+		reasoningContent: "thinking trace",
+	}
+	al := NewAgentLoop(cfg, msgBus, provider)
+
+	response, err := al.processMessage(context.Background(), bus.InboundMessage{
+		Channel:  "pico",
+		SenderID: "user1",
+		ChatID:   "pico:test-session",
+		Content:  "hello",
+	})
+	if err != nil {
+		t.Fatalf("processMessage() error = %v", err)
+	}
+	if response != "" {
+		t.Fatalf("processMessage() response = %q, want empty string", response)
+	}
+
+	var thoughtMsg *bus.OutboundMessage
+	deadline := time.After(3 * time.Second)
+	for thoughtMsg == nil {
+		select {
+		case outbound := <-msgBus.OutboundChan():
+			msg := outbound
+			if msg.Content == "thinking trace" {
+				thoughtMsg = &msg
+			}
+		case <-deadline:
+			t.Fatal("expected thought outbound message for pico")
+		}
+	}
+
+	if thoughtMsg.Context.Raw[metadataKeyMessageKind] != messageKindThought {
+		t.Fatalf("thought metadata kind = %q, want %q", thoughtMsg.Context.Raw[metadataKeyMessageKind], messageKindThought)
+	}
+
+}
+
+func TestProcessMessage_PicoHandledUserToolDoesNotFallbackToEmptyResponseError(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := config.DefaultConfig()
+	cfg.Agents.Defaults.Workspace = tmpDir
+	cfg.Agents.Defaults.ModelName = "test-model"
+	cfg.Agents.Defaults.MaxTokens = 4096
+	cfg.Agents.Defaults.MaxToolIterations = 10
+
+	msgBus := bus.NewMessageBus()
+	provider := &handledUserProvider{}
+	al := NewAgentLoop(cfg, msgBus, provider)
+	al.RegisterTool(&handledUserTool{})
+
+	response, err := al.processMessage(context.Background(), bus.InboundMessage{
+		Channel:  "pico",
+		SenderID: "user1",
+		ChatID:   "pico:test-session",
+		Content:  "hello",
+	})
+	if err != nil {
+		t.Fatalf("processMessage() error = %v", err)
+	}
+	if response != "" {
+		t.Fatalf("processMessage() response = %q, want empty string", response)
+	}
+
+	var sawHandled bool
+	deadline := time.After(3 * time.Second)
+	for !sawHandled {
+		select {
+		case outbound := <-msgBus.OutboundChan():
+			if outbound.Content == "Handled user output from tool." {
+				sawHandled = true
+			}
+			if outbound.Content == "Delivering the result now." {
+				t.Fatalf("unexpected pico interim assistant content published")
+			}
+			if outbound.Content == defaultResponse {
+				t.Fatalf("unexpected empty-response fallback published to pico")
+			}
+		case <-deadline:
+			t.Fatal("expected handled tool output to be published to pico")
+		}
+	}
+}
+
 func TestProcessHeartbeat_DoesNotPublishToolFeedback(t *testing.T) {
 	tmpDir := t.TempDir()
 	heartbeatFile := filepath.Join(tmpDir, "heartbeat-task.txt")
