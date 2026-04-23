@@ -15,6 +15,13 @@ import (
 	"github.com/sipeed/picoclaw/pkg/utils"
 )
 
+func defaultResponseForChannel(channel string) string {
+	if strings.EqualFold(strings.TrimSpace(channel), "pico") {
+		return ""
+	}
+	return defaultResponse
+}
+
 func (al *AgentLoop) buildContinuationTarget(msg bus.InboundMessage) (*continuationTarget, error) {
 	if msg.Channel == "system" {
 		return nil, nil
@@ -94,7 +101,7 @@ func (al *AgentLoop) ProcessHeartbeat(
 	}
 	return al.runAgentLoop(ctx, agent, processOptions{
 		Dispatch:               dispatch,
-		DefaultResponse:        defaultResponse,
+		DefaultResponse:        defaultResponseForChannel(channel),
 		EnableSummary:          false,
 		SendResponse:           false,
 		SuppressToolFeedback:   true,
@@ -191,7 +198,7 @@ func (al *AgentLoop) processMessage(ctx context.Context, msg bus.InboundMessage)
 		},
 		SenderID:                msg.SenderID,
 		SenderDisplayName:       msg.Sender.DisplayName,
-		DefaultResponse:         defaultResponse,
+		DefaultResponse:         defaultResponseForChannel(msg.Channel),
 		EnableSummary:           true,
 		SendResponse:            false,
 		AllowInterimPicoPublish: true,
