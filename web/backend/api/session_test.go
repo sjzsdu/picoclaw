@@ -251,6 +251,7 @@ func TestHandleGetSession_JSONLStorage(t *testing.T) {
 
 	var resp struct {
 		ID       string `json:"id"`
+		Title    string `json:"title"`
 		Summary  string `json:"summary"`
 		Messages []struct {
 			Role    string `json:"role"`
@@ -262,6 +263,9 @@ func TestHandleGetSession_JSONLStorage(t *testing.T) {
 	}
 	if resp.ID != "detail-jsonl" {
 		t.Fatalf("resp.ID = %q, want %q", resp.ID, "detail-jsonl")
+	}
+	if resp.Title != "" {
+		t.Fatalf("resp.Title = %q, want empty", resp.Title)
 	}
 	if resp.Summary != "detail summary" {
 		t.Fatalf("resp.Summary = %q, want %q", resp.Summary, "detail summary")
@@ -330,6 +334,80 @@ func TestHandleGetSession_HidesHandledToolAttachmentsBackedByMediaRefs(t *testin
 	}
 	if resp.Messages[0].Role != "user" || resp.Messages[0].Content != "send me the report" {
 		t.Fatalf("message = %#v, want only user request", resp.Messages[0])
+	}
+}
+
+func TestHandleUpdateSession_JSONLTitlePersists(t *testing.T) {
+	configPath, cleanup := setupOAuthTestEnv(t)
+	defer cleanup()
+
+	dir := sessionsTestDir(t, configPath)
+	store, err := memory.NewJSONLStore(dir)
+	if err != nil {
+		t.Fatalf("NewJSONLStore() error = %v", err)
+	}
+
+	sessionKey := legacyPicoSessionPrefix + "rename-jsonl"
+	if err := store.AddFullMessage(nil, sessionKey, providers.Message{
+		Role:    "user",
+		Content: "original preview",
+	}); err != nil {
+		t.Fatalf("AddFullMessage() error = %v", err)
+	}
+
+	h := NewHandler(configPath)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	patchRec := httptest.NewRecorder()
+	patchReq := httptest.NewRequest(
+		http.MethodPatch,
+		"/api/sessions/rename-jsonl",
+		strings.NewReader(`{"title":"Pinned title from server"}`),
+	)
+	patchReq.Header.Set("Content-Type", "application/json")
+	mux.ServeHTTP(patchRec, patchReq)
+
+	if patchRec.Code != http.StatusOK {
+		t.Fatalf("patch status = %d, want %d, body=%s", patchRec.Code, http.StatusOK, patchRec.Body.String())
+	}
+
+	listRec := httptest.NewRecorder()
+	listReq := httptest.NewRequest(http.MethodGet, "/api/sessions", nil)
+	mux.ServeHTTP(listRec, listReq)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("list status = %d, want %d, body=%s", listRec.Code, http.StatusOK, listRec.Body.String())
+	}
+
+	var items []sessionListItem
+	if err := json.Unmarshal(listRec.Body.Bytes(), &items); err != nil {
+		t.Fatalf("Unmarshal(list) error = %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("len(items) = %d, want 1", len(items))
+	}
+	if items[0].Title != "Pinned title from server" {
+		t.Fatalf("items[0].Title = %q, want %q", items[0].Title, "Pinned title from server")
+	}
+	if items[0].Preview != "original preview" {
+		t.Fatalf("items[0].Preview = %q, want %q", items[0].Preview, "original preview")
+	}
+
+	detailRec := httptest.NewRecorder()
+	detailReq := httptest.NewRequest(http.MethodGet, "/api/sessions/rename-jsonl", nil)
+	mux.ServeHTTP(detailRec, detailReq)
+	if detailRec.Code != http.StatusOK {
+		t.Fatalf("detail status = %d, want %d, body=%s", detailRec.Code, http.StatusOK, detailRec.Body.String())
+	}
+
+	var detailResp struct {
+		Title string `json:"title"`
+	}
+	if err := json.Unmarshal(detailRec.Body.Bytes(), &detailResp); err != nil {
+		t.Fatalf("Unmarshal(detail) error = %v", err)
+	}
+	if detailResp.Title != "Pinned title from server" {
+		t.Fatalf("detailResp.Title = %q, want %q", detailResp.Title, "Pinned title from server")
 	}
 }
 
@@ -404,6 +482,65 @@ func TestHandleGetSession_ExposesHandledToolAttachmentsWithDurableURL(t *testing
 	}
 	if assistant.Attachments[0].Filename != "report.txt" {
 		t.Fatalf("attachment filename = %q, want %q", assistant.Attachments[0].Filename, "report.txt")
+	}
+}
+
+func TestHandleUpdateSession_LegacyTitlePersists(t *testing.T) {
+	configPath, cleanup := setupOAuthTestEnv(t)
+	defer cleanup()
+
+	dir := sessionsTestDir(t, configPath)
+	legacyPath := filepath.Join(dir, sanitizeSessionKey(legacyPicoSessionPrefix+"rename-legacy")+".json")
+	legacy := sessionFile{
+		Key: legacyPicoSessionPrefix + "rename-legacy",
+		Messages: []providers.Message{{
+			Role:    "user",
+			Content: "legacy preview",
+		}},
+		Created: time.Now().Add(-time.Hour),
+		Updated: time.Now().Add(-time.Minute),
+	}
+	data, err := json.MarshalIndent(legacy, "", "  ")
+	if err != nil {
+		t.Fatalf("MarshalIndent() error = %v", err)
+	}
+	if err := os.WriteFile(legacyPath, append(data, '\n'), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	h := NewHandler(configPath)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	patchRec := httptest.NewRecorder()
+	patchReq := httptest.NewRequest(
+		http.MethodPatch,
+		"/api/sessions/rename-legacy",
+		strings.NewReader(`{"title":"Legacy custom title"}`),
+	)
+	patchReq.Header.Set("Content-Type", "application/json")
+	mux.ServeHTTP(patchRec, patchReq)
+
+	if patchRec.Code != http.StatusOK {
+		t.Fatalf("patch status = %d, want %d, body=%s", patchRec.Code, http.StatusOK, patchRec.Body.String())
+	}
+
+	listRec := httptest.NewRecorder()
+	listReq := httptest.NewRequest(http.MethodGet, "/api/sessions", nil)
+	mux.ServeHTTP(listRec, listReq)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("list status = %d, want %d, body=%s", listRec.Code, http.StatusOK, listRec.Body.String())
+	}
+
+	var items []sessionListItem
+	if err := json.Unmarshal(listRec.Body.Bytes(), &items); err != nil {
+		t.Fatalf("Unmarshal(list) error = %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("len(items) = %d, want 1", len(items))
+	}
+	if items[0].Title != "Legacy custom title" {
+		t.Fatalf("items[0].Title = %q, want %q", items[0].Title, "Legacy custom title")
 	}
 }
 
