@@ -1,7 +1,7 @@
 import {
-  IconFolderOpen,
   IconDeviceFloppy,
   IconEdit,
+  IconFolderOpen,
   IconLoader2,
   IconPlus,
   IconTrash,
@@ -19,9 +19,9 @@ import {
   getAgentConfigs,
   updateAgentConfig,
 } from "@/api/agent-configs"
-import { PageHeader } from "@/components/page-header"
 import { DeleteAgentDialog } from "@/components/agent/manage/delete-agent-dialog"
 import { WorkspaceFilesEditor } from "@/components/agent/manage/workspace-files-editor"
+import { PageHeader } from "@/components/page-header"
 import { Field } from "@/components/shared-form"
 import { Button } from "@/components/ui/button"
 import {
@@ -105,9 +105,12 @@ export function ManagePage() {
   const [editingAgent, setEditingAgent] = useState<AgentConfigInfo | null>(null)
   const [isCreating, setIsCreating] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
-  const [agentPendingDelete, setAgentPendingDelete] = useState<AgentConfigInfo | null>(null)
+  const [agentPendingDelete, setAgentPendingDelete] =
+    useState<AgentConfigInfo | null>(null)
   const [isDeletePending, setIsDeletePending] = useState(false)
-  const [workspaceEditorAgentId, setWorkspaceEditorAgentId] = useState<string | null>(null)
+  const [workspaceEditorAgentId, setWorkspaceEditorAgentId] = useState<
+    string | null
+  >(null)
   const [form, setForm] = useState<AgentFormState>(EMPTY_FORM)
   const [saving, setSaving] = useState(false)
 
@@ -318,75 +321,102 @@ export function ManagePage() {
       </div>
 
       <Dialog open={editorOpen} onOpenChange={setEditorOpen}>
-        <DialogContent className="max-h-[90vh] overflow-auto sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>{dialogTitle}</DialogTitle>
+        <DialogContent className="overflow-auto sm:max-w-2xl">
+          <DialogHeader className="pb-4">
+            <DialogTitle className="text-lg">
+              {isCreating ? t("pages.agent.manage.add.title") : dialogTitle}
+            </DialogTitle>
             <DialogDescription>
               {t("pages.agent.manage.editDescription")}
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-0">
-            <Field
-              label={t("pages.agent.manage.form.id")}
-              hint={
-                isCreating
-                  ? t("pages.agent.manage.form.idHint")
-                  : t("pages.agent.manage.form.idLocked")
-              }
-              layout="setting-row"
-            >
-              <Input
-                value={form.id}
-                onChange={(e) => handleFieldChange("id", e.target.value)}
-                disabled={!isCreating}
-              />
-            </Field>
-            <Field
-              label={t("pages.agent.manage.form.name")}
-              hint={t("pages.agent.manage.form.nameHint")}
-              layout="setting-row"
-            >
-              <Input
-                value={form.name}
-                onChange={(e) => handleFieldChange("name", e.target.value)}
-              />
-            </Field>
-            <Field
-              label={t("pages.agent.manage.form.model")}
-              hint={t("pages.agent.manage.form.modelHint")}
-              layout="setting-row"
-            >
-              <Input
-                value={form.modelName}
-                onChange={(e) => handleFieldChange("modelName", e.target.value)}
-                placeholder={t("pages.agent.manage.inherit")}
-              />
-            </Field>
-            <Field
-              label={t("pages.agent.manage.form.workspace")}
-              hint={t("pages.agent.manage.form.workspaceHint")}
-              layout="setting-row"
-            >
-              <Input
-                value={form.workspace}
-                onChange={(e) => handleFieldChange("workspace", e.target.value)}
-                placeholder={t("pages.agent.manage.inherit")}
-              />
-            </Field>
-            <Field
-              label={t("pages.agent.manage.form.skills")}
-              hint={t("pages.agent.manage.form.skillsHint")}
-              layout="setting-row"
-            >
-              <Input
-                value={form.skillsText}
-                onChange={(e) => handleFieldChange("skillsText", e.target.value)}
-                placeholder="gh-cli, jira"
-              />
-            </Field>
+
+          <div className="space-y-5 py-2">
+            <div className="bg-card rounded-lg border p-4">
+              <h4 className="text-foreground mb-3 text-sm font-medium">
+                {t("pages.agent.manage.form.basicInfo")}
+              </h4>
+              <div className="space-y-4">
+                <Field
+                  label={t("pages.agent.manage.form.id")}
+                  hint={
+                    isCreating
+                      ? t("pages.agent.manage.form.idHint")
+                      : t("pages.agent.manage.form.idLocked")
+                  }
+                  layout="setting-row"
+                >
+                  <Input
+                    value={form.id}
+                    onChange={(e) => handleFieldChange("id", e.target.value)}
+                    disabled={!isCreating}
+                    className="font-mono text-sm"
+                  />
+                </Field>
+                <Field
+                  label={t("pages.agent.manage.form.name")}
+                  hint={t("pages.agent.manage.form.nameHint")}
+                  layout="setting-row"
+                >
+                  <Input
+                    value={form.name}
+                    onChange={(e) => handleFieldChange("name", e.target.value)}
+                    placeholder={t("pages.agent.manage.form.namePlaceholder")}
+                  />
+                </Field>
+              </div>
+            </div>
+
+            <div className="bg-card rounded-lg border p-4">
+              <h4 className="text-foreground mb-3 text-sm font-medium">
+                {t("pages.agent.manage.form.advancedSettings")}
+              </h4>
+              <div className="space-y-4">
+                <Field
+                  label={t("pages.agent.manage.form.model")}
+                  hint={t("pages.agent.manage.form.modelHint")}
+                  layout="setting-row"
+                >
+                  <Input
+                    value={form.modelName}
+                    onChange={(e) =>
+                      handleFieldChange("modelName", e.target.value)
+                    }
+                    placeholder={t("pages.agent.manage.inherit")}
+                  />
+                </Field>
+                <Field
+                  label={t("pages.agent.manage.form.workspace")}
+                  hint={t("pages.agent.manage.form.workspaceHint")}
+                  layout="setting-row"
+                >
+                  <Input
+                    value={form.workspace}
+                    onChange={(e) =>
+                      handleFieldChange("workspace", e.target.value)
+                    }
+                    placeholder={t("pages.agent.manage.inherit")}
+                    className="font-mono text-sm"
+                  />
+                </Field>
+                <Field
+                  label={t("pages.agent.manage.form.skills")}
+                  hint={t("pages.agent.manage.form.skillsHint")}
+                  layout="setting-row"
+                >
+                  <Input
+                    value={form.skillsText}
+                    onChange={(e) =>
+                      handleFieldChange("skillsText", e.target.value)
+                    }
+                    placeholder="gh-cli, jira"
+                  />
+                </Field>
+              </div>
+            </div>
           </div>
 
-          <DialogFooter>
+          <DialogFooter className="gap-2 border-t pt-4">
             <Button variant="outline" onClick={() => setEditorOpen(false)}>
               {t("common.cancel")}
             </Button>

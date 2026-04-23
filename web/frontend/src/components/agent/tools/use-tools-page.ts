@@ -4,11 +4,11 @@ import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 
 import {
+  type WebSearchConfigResponse,
   getTools,
   getWebSearchConfig,
   setToolEnabled,
   updateWebSearchConfig,
-  type WebSearchConfigResponse,
 } from "@/api/tools"
 import { refreshGatewayState } from "@/store/gateway"
 
@@ -35,7 +35,10 @@ export function useToolsPage() {
     queryFn: getWebSearchConfig,
   })
 
-  const tools = useMemo(() => toolsQuery.data?.tools ?? [], [toolsQuery.data?.tools])
+  const tools = useMemo(
+    () => toolsQuery.data?.tools ?? [],
+    [toolsQuery.data?.tools],
+  )
   const normalizedSearchQuery = deferredSearchQuery.trim().toLowerCase()
   const webSearchDraft = webSearchDraftOverride ?? webSearchQuery.data ?? null
 
@@ -105,7 +108,9 @@ export function useToolsPage() {
       }
 
       if (normalizedSearchQuery) {
-        const matchesName = tool.name.toLowerCase().includes(normalizedSearchQuery)
+        const matchesName = tool.name
+          .toLowerCase()
+          .includes(normalizedSearchQuery)
         const matchesDescription = (tool.description || "")
           .toLowerCase()
           .includes(normalizedSearchQuery)

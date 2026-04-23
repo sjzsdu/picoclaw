@@ -2,6 +2,7 @@ import {
   IconEdit,
   IconKey,
   IconLoader2,
+  IconPlayerPlay,
   IconStar,
   IconStarFilled,
   IconTrash,
@@ -21,8 +22,10 @@ import {
 interface ModelCardProps {
   model: ModelInfo
   onEdit: (model: ModelInfo) => void
+  onTest: (model: ModelInfo) => void
   onSetDefault: (model: ModelInfo) => void
   onDelete: (model: ModelInfo) => void
+  testing?: boolean
   settingDefault: boolean
   testingAll?: boolean
 }
@@ -30,8 +33,10 @@ interface ModelCardProps {
 export function ModelCard({
   model,
   onEdit,
+  onTest,
   onSetDefault,
   onDelete,
+  testing,
   settingDefault,
   testingAll,
 }: ModelCardProps) {
@@ -65,11 +70,18 @@ export function ModelCard({
   })()
 
   const editLabel = t("models.action.edit")
+  const testLabel = t("models.action.test")
   const deleteLabel = t("models.action.delete")
   const deleteDisabledReason = model.is_default
     ? t("models.action.deleteDisabled.isDefault")
     : deleteLabel
   const deleteDisabled = model.is_default
+  const testDisabled = model.is_virtual || testingAll
+  const testDisabledReason = model.is_virtual
+    ? t("models.action.testDisabled.isVirtual")
+    : testingAll
+      ? t("models.action.testDisabled.testingAll")
+      : testLabel
 
   return (
     <div
@@ -168,6 +180,35 @@ export function ModelCard({
           >
             <IconEdit className="size-3.5" />
           </Button>
+
+          <Tooltip delayDuration={testDisabled ? 0 : 700}>
+            <TooltipTrigger asChild>
+              <span
+                className={testDisabled ? "cursor-not-allowed" : undefined}
+                tabIndex={testDisabled ? 0 : undefined}
+                role={testDisabled ? "button" : undefined}
+                aria-disabled={testDisabled ? true : undefined}
+                aria-label={testDisabled ? testLabel : undefined}
+                title={testDisabled ? testLabel : undefined}
+              >
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={() => onTest(model)}
+                  disabled={testDisabled || testing}
+                  aria-label={testLabel}
+                  title={testLabel}
+                >
+                  {testing ? (
+                    <IconLoader2 className="size-3.5 animate-spin" />
+                  ) : (
+                    <IconPlayerPlay className="size-3.5" />
+                  )}
+                </Button>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent>{testDisabledReason}</TooltipContent>
+          </Tooltip>
 
           <Tooltip delayDuration={deleteDisabled ? 0 : 700}>
             <TooltipTrigger asChild>

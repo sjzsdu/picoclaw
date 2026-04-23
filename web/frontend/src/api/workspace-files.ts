@@ -51,7 +51,9 @@ export async function getWorkspaceFiles(
   agentId?: string,
 ): Promise<WorkspaceFileListResponse> {
   const params = agentId ? `?agent_id=${encodeURIComponent(agentId)}` : ""
-  return request<WorkspaceFileListResponse>(`/api/agent-workspace-files${params}`)
+  return request<WorkspaceFileListResponse>(
+    `/api/agent-workspace-files${params}`,
+  )
 }
 
 export async function getWorkspaceFile(

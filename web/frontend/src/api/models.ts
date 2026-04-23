@@ -46,6 +46,49 @@ interface ModelActionResponse {
   default_model?: string
 }
 
+export interface ModelTestResponse {
+  status: string
+  message?: string
+  available?: boolean
+  reason?: string
+}
+
+export interface ModelBatchTestResult {
+  index: number
+  model_name: string
+  available: boolean
+  status: "available" | "unreachable" | "unconfigured"
+  reason?: string
+  last_test_status?: string
+  last_test_reason?: string
+  last_test_message?: string
+  last_tested_at_unix?: number
+}
+
+export interface ModelBatchTestResponse {
+  status: string
+  results: ModelBatchTestResult[]
+}
+
+interface TestModelPayload {
+  model_name: string
+  model: string
+  api_base?: string
+  proxy?: string
+  auth_method?: string
+  connect_mode?: string
+  workspace?: string
+  rpm?: number
+  max_tokens_field?: string
+  request_timeout?: number
+  thinking_level?: string
+  disable_tools?: boolean
+  extra_body?: Record<string, unknown>
+  custom_headers?: Record<string, string>
+  index?: number
+  include_tools?: boolean
+}
+
 const BASE_URL = ""
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
@@ -98,6 +141,26 @@ export async function setDefaultModel(
 
   await refreshGatewayState()
   return response
+}
+
+export async function testModel(
+  model: TestModelPayload,
+): Promise<ModelTestResponse> {
+  return request<ModelTestResponse>("/api/models/test", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(model),
+  })
+}
+
+export async function testAllModels(
+  providerKey?: string,
+): Promise<ModelBatchTestResponse> {
+  return request<ModelBatchTestResponse>("/api/models/test-all", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(providerKey ? { provider_key: providerKey } : {}),
+  })
 }
 
 export type { ModelsListResponse, ModelActionResponse }

@@ -10,7 +10,8 @@ function readStoredAgentId(sessionId: string): string {
     return ""
   }
   return (
-    globalThis.localStorage?.getItem(`${AGENT_STORAGE_KEY_PREFIX}${sessionId}`)
+    globalThis.localStorage
+      ?.getItem(`${AGENT_STORAGE_KEY_PREFIX}${sessionId}`)
       ?.trim() || ""
   )
 }
