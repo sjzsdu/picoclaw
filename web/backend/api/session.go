@@ -25,12 +25,14 @@ import (
 func (h *Handler) registerSessionRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/sessions", h.handleListSessions)
 	mux.HandleFunc("GET /api/sessions/{id}", h.handleGetSession)
+	mux.HandleFunc("PATCH /api/sessions/{id}", h.handleUpdateSession)
 	mux.HandleFunc("DELETE /api/sessions/{id}", h.handleDeleteSession)
 }
 
 // sessionFile mirrors the on-disk session JSON structure from pkg/session.
 type sessionFile struct {
 	Key      string              `json:"key"`
+	Title    string              `json:"title,omitempty"`
 	Messages []providers.Message `json:"messages"`
 	Summary  string              `json:"summary,omitempty"`
 	Created  time.Time           `json:"created"`
@@ -62,6 +64,10 @@ type sessionChatAttachment struct {
 	URL         string `json:"url,omitempty"`
 	Filename    string `json:"filename,omitempty"`
 	ContentType string `json:"content_type,omitempty"`
+}
+
+type updateSessionRequest struct {
+	Title string `json:"title"`
 }
 
 // legacyPicoSessionPrefix is the legacy key prefix used by older Pico JSON/JSONL
@@ -206,6 +212,7 @@ func (h *Handler) readJSONLSession(dir, sessionKey string) (sessionFile, error) 
 
 	return sessionFile{
 		Key:      meta.Key,
+		Title:    strings.TrimSpace(meta.Title),
 		Messages: messages,
 		Summary:  meta.Summary,
 		Created:  created,
@@ -442,6 +449,9 @@ func buildSessionListItem(sessionID string, sess sessionFile, toolFeedbackMaxArg
 		preview = "(empty)"
 	}
 	title := preview
+	if customTitle := truncateRunes(strings.TrimSpace(sess.Title), maxSessionTitleRunes); customTitle != "" {
+		title = customTitle
+	}
 
 	return sessionListItem {
 		ID:           sessionID,
@@ -1124,11 +1134,134 @@ func (h *Handler) handleGetSession(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{
 		"id":       sessionID,
+		"title":    truncateRunes(strings.TrimSpace(sess.Title), maxSessionTitleRunes),
 		"messages": messages,
 		"summary":  sess.Summary,
 		"created":  sess.Created.Format(time.RFC3339),
 		"updated":  sess.Updated.Format(time.RFC3339),
 	})
+}
+
+func normalizeSessionTitle(title string) string {
+	return truncateRunes(strings.TrimSpace(title), maxSessionTitleRunes)
+}
+
+func (h *Handler) updateJSONLSessionTitle(dir string, ref picoJSONLSessionRef, title string) error {
+	base := filepath.Join(dir, sanitizeSessionKey(ref.Key))
+	metaPath := base + ".meta.json"
+
+	meta, err := h.readSessionMeta(metaPath, ref.Key)
+	if err != nil {
+		return err
+	}
+	meta.Title = title
+
+	data, err := json.MarshalIndent(meta, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(metaPath, data, 0o644)
+}
+
+func (h *Handler) updateLegacySessionTitle(path, title string) error {
+	sess, err := h.readLegacySession(path)
+	if err != nil {
+		return err
+	}
+	sess.Title = title
+
+	data, err := json.MarshalIndent(sess, "", "  ")
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+	return os.WriteFile(path, data, 0o644)
+}
+
+// handleUpdateSession updates editable metadata for a specific session.
+//
+//	PATCH /api/sessions/{id}
+func (h *Handler) handleUpdateSession(w http.ResponseWriter, r *http.Request) {
+	sessionID := r.PathValue("id")
+	if sessionID == "" {
+		http.Error(w, "missing session id", http.StatusBadRequest)
+		return
+	}
+
+	var req updateSessionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	title := normalizeSessionTitle(req.Title)
+
+	// Load config once and resolve session location
+	cfg, err := config.LoadConfig(h.configPath)
+	if err != nil {
+		http.Error(w, "failed to load config", http.StatusInternalServerError)
+		return
+	}
+
+	defaultWorkspace := cfg.Agents.Defaults.Workspace
+	defaultDir := resolveSessionsDir(defaultWorkspace)
+
+	// Try default directory first (most common case)
+	if ref, err := h.findPicoJSONLSession(defaultDir, sessionID); err == nil {
+		if err := h.updateJSONLSessionTitle(defaultDir, ref, title); err != nil {
+			http.Error(w, "failed to update session", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"title": title})
+		return
+	}
+	if legacyRef, err := h.findLegacyPicoSession(defaultDir, sessionID); err == nil {
+		if err := h.updateLegacySessionTitle(legacyRef.Path, title); err != nil {
+			http.Error(w, "failed to update session", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"title": title})
+		return
+	}
+
+	// Session not found in default directory, search agent-specific directories
+	seen := make(map[string]struct{})
+	appendDir := func(workspace string) {
+		dir := resolveSessionsDir(workspace)
+		if _, exists := seen[dir]; exists {
+			return
+		}
+		seen[dir] = struct{}{}
+	}
+
+	appendDir(resolveAgentWorkspace(nil, &cfg.Agents.Defaults))
+	for i := range cfg.Agents.List {
+		appendDir(resolveAgentWorkspace(&cfg.Agents.List[i], &cfg.Agents.Defaults))
+	}
+
+	for dir := range seen {
+		if ref, err := h.findPicoJSONLSession(dir, sessionID); err == nil {
+			if err := h.updateJSONLSessionTitle(dir, ref, title); err != nil {
+				http.Error(w, "failed to update session", http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]string{"title": title})
+			return
+		}
+		if legacyRef, err := h.findLegacyPicoSession(dir, sessionID); err == nil {
+			if err := h.updateLegacySessionTitle(legacyRef.Path, title); err != nil {
+				http.Error(w, "failed to update session", http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]string{"title": title})
+			return
+		}
+	}
+
+	http.Error(w, "session not found", http.StatusNotFound)
 }
 
 // handleDeleteSession deletes a specific session.

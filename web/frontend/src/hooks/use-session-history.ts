@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
+import { toast } from "sonner"
 
-import { type SessionSummary, deleteSession, getSessions } from "@/api/sessions"
+import {
+  type SessionSummary,
+  deleteSession,
+  getSessions,
+  updateSessionTitle,
+} from "@/api/sessions"
 import {
   CHAT_SESSION_ACTIVITY_EVENT,
   type ChatSessionActivityDetail,
@@ -161,9 +167,7 @@ export function useSessionHistory({
     async (session: SessionSummary) => {
       const id = session.id
       try {
-        const deletedLoadedSession = sessions.some(
-          (s) => s.id === id,
-        )
+        const deletedLoadedSession = sessions.some((s) => s.id === id)
         await deleteSession(id)
         setSessions((prev) => prev.filter((s) => s.id !== id))
         if (deletedLoadedSession) {
@@ -179,6 +183,35 @@ export function useSessionHistory({
     [activeSessionId, onDeletedActiveSession, sessions],
   )
 
+  const handleRenameSession = useCallback(
+    async (session: SessionSummary, title: string) => {
+      const normalized = title.trim()
+      const controller = new AbortController()
+      const timeout = setTimeout(() => controller.abort(), 8000)
+      try {
+        const result = await updateSessionTitle(
+          session.id,
+          normalized,
+          controller.signal,
+        )
+        clearTimeout(timeout)
+        setSessions((prev) =>
+          prev.map((item) =>
+            item.id === session.id ? { ...item, title: result.title } : item,
+          ),
+        )
+      } catch (err) {
+        clearTimeout(timeout)
+        // Don't show toast for abort (timeout) - the dialog will handle it via loading reset
+        if (err instanceof Error && err.name !== "AbortError") {
+          console.error("Failed to rename session:", err)
+          toast.error(t("chat.renameFailed", { defaultValue: "Failed to rename session" }))
+        }
+      }
+    },
+    [t],
+  )
+
   return {
     sessions,
     hasMore,
@@ -187,5 +220,6 @@ export function useSessionHistory({
     observerRef,
     loadSessions,
     handleDeleteSession,
+    handleRenameSession,
   }
 }

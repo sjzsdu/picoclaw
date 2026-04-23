@@ -13,6 +13,7 @@ export interface SessionSummary {
 
 export interface SessionDetail {
   id: string
+  title: string
   messages: {
     role: "user" | "assistant"
     content: string
@@ -63,4 +64,23 @@ export async function deleteSession(id: string): Promise<void> {
   if (!res.ok) {
     throw new Error(`Failed to delete session ${id}: ${res.status}`)
   }
+}
+
+export async function updateSessionTitle(
+  id: string,
+  title: string,
+  signal?: AbortSignal,
+): Promise<{ title: string }> {
+  const res = await launcherFetch(`/api/sessions/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ title }),
+    signal,
+  })
+  if (!res.ok) {
+    throw new Error(`Failed to update session ${id}: ${res.status}`)
+  }
+  return res.json()
 }
