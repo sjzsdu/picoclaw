@@ -68,6 +68,9 @@
     "historyLoadFailed": "加载历史记录失败",
     "historyOpenFailed": "打开该历史会话失败",
     "loadingMore": "加载更多...",
+    "renameSession": "重命名会话",
+    "renameSessionDesc": "输入会话的新名称",
+    "sessionTitlePlaceholder": "输入会话标题",
     "deleteSession": "删除会话",
     "messagesCount": "{{count}} 条消息",
     "noModel": "选择模型",
@@ -222,8 +225,14 @@
     },
     "action": {
       "edit": "编辑 API Key",
+      "test": "测试",
+      "testAll": "测试本组",
       "setDefault": "设为默认",
       "delete": "删除模型",
+      "testDisabled": {
+        "isVirtual": "无法直接测试虚拟模型",
+        "testingAll": "正在批量测试该分组"
+      },
       "setDefaultDisabled": {
         "setting": "正在设为默认...",
         "unavailable": "无法将不可用的模型设为默认",
@@ -295,6 +304,13 @@
       "apiKeyHint": "已设置 API Key，留空表示不修改。",
       "oauthNote": "该服务商使用 OAuth 认证，无需 API Key。",
       "saveError": "保存失败"
+    },
+    "test": {
+      "lastResultPrefix": "最近测试：",
+      "persisted": {
+        "ok": "测试通过",
+        "error": "测试失败"
+      }
     }
   },
   "channels": {
@@ -474,6 +490,9 @@
           "idLocked": "为保证会话历史和工作区稳定，创建后 ID 将被锁定。",
           "name": "显示名称",
           "nameHint": "用于聊天选择器和 Launcher 侧边栏显示。",
+          "namePlaceholder": "例如 助手",
+          "basicInfo": "基本信息",
+          "advancedSettings": "高级设置",
           "model": "主模型",
           "modelHint": "留空则继承全局默认智能体模型。",
           "workspace": "工作区覆盖",

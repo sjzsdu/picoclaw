@@ -110,6 +110,10 @@ export function useSessionHistory({
   )
 
   useEffect(() => {
+    void loadSessions(true)
+  }, [])
+
+  useEffect(() => {
     if (!observerRef.current || !hasMore || isLoadingMore || loadError) return
 
     const observer = new IntersectionObserver(
@@ -205,7 +209,11 @@ export function useSessionHistory({
         // Don't show toast for abort (timeout) - the dialog will handle it via loading reset
         if (err instanceof Error && err.name !== "AbortError") {
           console.error("Failed to rename session:", err)
-          toast.error(t("chat.renameFailed", { defaultValue: "Failed to rename session" }))
+          toast.error(
+            t("chat.renameFailed", {
+              defaultValue: "Failed to rename session",
+            }),
+          )
         }
       }
     },

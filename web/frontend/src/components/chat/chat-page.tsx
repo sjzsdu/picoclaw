@@ -13,7 +13,7 @@ import {
 } from "@/components/chat/chat-composer"
 import { ChatEmptyState } from "@/components/chat/chat-empty-state"
 import { ModelSelector } from "@/components/chat/model-selector"
-import { SessionHistoryMenu } from "@/components/chat/session-history-menu"
+import { SessionHistoryDropdown } from "@/components/chat/session-history-dropdown"
 import { TypingIndicator } from "@/components/chat/typing-indicator"
 import { UserMessage } from "@/components/chat/user-message"
 import { PageHeader } from "@/components/page-header"
@@ -93,11 +93,9 @@ function resolveChatInputDisabledReason({
 export function ChatPage() {
   const { t } = useTranslation()
   const navigate = useNavigate({ from: "/" })
-  const search = useSearch({ from: "/" })
   const scrollRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const messageRefs = useRef<Record<string, HTMLDivElement | null>>({})
-  const openedHistoryIdRef = useRef("")
   const [isAtBottom, setIsAtBottom] = useState(true)
   const [hasScrolled, setHasScrolled] = useState(false)
   const [input, setInput] = useState("")
@@ -144,18 +142,13 @@ export function ChatPage() {
   const inputDisabledReason = resolveChatInputDisabledReason({
     hasDefaultModel: Boolean(defaultModelName),
     connectionState,
-    gatewayState: gwState,
-  })
+    gatewayState: gwState,  })
   const canSend = isChatConnected && Boolean(defaultModelName) && !isTyping
 
   const {
     sessions,
-    hasMore,
-    loadError,
-    loadErrorMessage,
-    observerRef,
-    loadSessions,
     handleDeleteSession,
+    handleRenameSession,
   } = useSessionHistory({
     activeSessionId,
     onDeletedActiveSession: newChat,
@@ -194,19 +187,6 @@ export function ChatPage() {
       behavior: "smooth",
     })
   }
-
-  useEffect(() => {
-    const historyId = search.history?.trim() ?? ""
-    if (!historyId) {
-      openedHistoryIdRef.current = ""
-      return
-    }
-    if (openedHistoryIdRef.current === historyId) {
-      return
-    }
-    openedHistoryIdRef.current = historyId
-    void switchSession(historyId)
-  }, [search.history, switchSession])
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -272,7 +252,7 @@ export function ChatPage() {
       sendMessage({
         content: input,
         attachments,
-	        agentId: selectedAgentId || undefined,
+        agentId: selectedAgentId || undefined,
       })
     ) {
       setInput("")
@@ -343,8 +323,7 @@ export function ChatPage() {
     [messages],
   )
 
-  const canSubmit =
-    canSend && (Boolean(input.trim()) || attachments.length > 0)
+  const canSubmit = canSend && (Boolean(input.trim()) || attachments.length > 0)
 
   return (
     <div className="bg-background/95 flex h-full flex-col">
@@ -390,7 +369,6 @@ export function ChatPage() {
           variant="secondary"
           size="sm"
           onClick={() => {
-            openedHistoryIdRef.current = ""
             void navigate({
               to: "/",
               search: (prev) => ({ ...prev, history: undefined }),
@@ -403,39 +381,18 @@ export function ChatPage() {
           <IconPlus className="size-4" />
           <span className="hidden sm:inline">{t("chat.newChat")}</span>
         </Button>
-
-        <SessionHistoryMenu
+        <SessionHistoryDropdown
           sessions={sessions}
           activeSessionId={activeSessionId}
-          hasMore={hasMore}
-          loadError={loadError}
-          loadErrorMessage={loadErrorMessage}
-          observerRef={observerRef}
-          resolveAgentLabel={(agentId) =>
-            agentNameById.get(agentId) || agentId
-          }
-          onOpenChange={(open) => {
-            if (open) {
-              void loadSessions(true)
-            }
-          }}
           onSwitchSession={(session) => {
-            openedHistoryIdRef.current = session.id
             void navigate({
               to: "/",
               search: (prev) => ({ ...prev, history: session.id }),
             })
             void switchSession(session.id, session.session_id, session.agent_id)
           }}
+          onRenameSession={handleRenameSession}
           onDeleteSession={(session) => {
-            if (openedHistoryIdRef.current === session.id) {
-              openedHistoryIdRef.current = ""
-              void navigate({
-                to: "/",
-                search: (prev) => ({ ...prev, history: undefined }),
-                replace: true,
-              })
-            }
             void handleDeleteSession(session)
           }}
         />
@@ -532,7 +489,7 @@ export function ChatPage() {
             variant="secondary"
             className={`border-border/60 text-foreground pointer-events-auto absolute right-0 bottom-4 h-10 w-10 rounded-full border shadow-sm backdrop-blur transition-all duration-300 ${
               isAtBottom
-                ? "translate-y-2 opacity-0 pointer-events-none"
+                ? "pointer-events-none translate-y-2 opacity-0"
                 : "translate-y-0 opacity-100"
             }`}
             onClick={scrollToBottom}

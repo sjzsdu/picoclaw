@@ -327,15 +327,15 @@ export async function hydrateActiveSession() {
 }
 
 interface SendChatMessageInput {
-	content: string
-	attachments?: ChatAttachment[]
-	agentId?: string
+  content: string
+  attachments?: ChatAttachment[]
+  agentId?: string
 }
 
 export function sendChatMessage({
-	content,
-	attachments = [],
-	agentId,
+  content,
+  attachments = [],
+  agentId,
 }: SendChatMessageInput) {
   if (!wsRef || wsRef.readyState !== WebSocket.OPEN) {
     console.warn("WebSocket not connected")
@@ -372,20 +372,22 @@ export function sendChatMessage({
   try {
     notifySessionActivity({
       sessionId: activeSessionIdRef,
-      preview: normalizedContent || (normalizedAttachments.length > 0 ? "[image]" : ""),
+      preview:
+        normalizedContent ||
+        (normalizedAttachments.length > 0 ? "[image]" : ""),
       timestamp: new Date().toISOString(),
     })
     socket.send(
-		JSON.stringify({
-			type: "message.send",
-			id,
-			payload: {
-				content: normalizedContent,
-				...(agentId ? { agent_id: agentId } : {}),
-				media: normalizedAttachments.map((attachment) => attachment.url),
-			},
-		}),
-	)
+      JSON.stringify({
+        type: "message.send",
+        id,
+        payload: {
+          content: normalizedContent,
+          ...(agentId ? { agent_id: agentId } : {}),
+          media: normalizedAttachments.map((attachment) => attachment.url),
+        },
+      }),
+    )
     return true
   } catch (error) {
     console.error("Failed to send pico message:", error)

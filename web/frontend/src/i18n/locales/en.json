@@ -68,6 +68,9 @@
     "historyLoadFailed": "Failed to load chat history",
     "historyOpenFailed": "Failed to open this chat history",
     "loadingMore": "Loading more...",
+    "renameSession": "Rename session",
+    "renameSessionDesc": "Enter a new name for this chat",
+    "sessionTitlePlaceholder": "Enter session title",
     "deleteSession": "Delete session",
     "messagesCount": "{{count}} messages",
     "noModel": "Select model",
@@ -222,8 +225,14 @@
     },
     "action": {
       "edit": "Edit API key",
+      "test": "Test",
+      "testAll": "Test Group",
       "setDefault": "Set as default",
       "delete": "Delete model",
+      "testDisabled": {
+        "isVirtual": "Virtual models cannot be tested directly",
+        "testingAll": "This provider group is being tested"
+      },
       "setDefaultDisabled": {
         "setting": "Setting as default...",
         "unavailable": "Cannot set unavailable model as default",
@@ -295,6 +304,13 @@
       "apiKeyHint": "A key is already set. Leave blank to keep it unchanged.",
       "oauthNote": "This provider uses OAuth — no API key required.",
       "saveError": "Failed to save"
+    },
+    "test": {
+      "lastResultPrefix": "Last test: ",
+      "persisted": {
+        "ok": "Passed",
+        "error": "Failed"
+      }
     }
   },
   "channels": {
@@ -474,6 +490,9 @@
           "idLocked": "IDs are locked after creation to keep session history and workspaces stable.",
           "name": "Display name",
           "nameHint": "Shown in chat selectors and the launcher sidebar.",
+          "namePlaceholder": "e.g. Assistant",
+          "basicInfo": "Basic Information",
+          "advancedSettings": "Advanced Settings",
           "model": "Primary model",
           "modelHint": "Leave blank to inherit the global agent default model.",
           "workspace": "Workspace override",

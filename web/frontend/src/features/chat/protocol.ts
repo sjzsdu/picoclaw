@@ -184,9 +184,7 @@ export function handlePicoMessage(
       const agentId =
         typeof payload.agent_id === "string" ? payload.agent_id : undefined
       const modelName =
-        typeof payload.model_name === "string"
-          ? payload.model_name
-          : undefined
+        typeof payload.model_name === "string" ? payload.model_name : undefined
       const timestamp =
         message.timestamp !== undefined &&
         Number.isFinite(Number(message.timestamp))
