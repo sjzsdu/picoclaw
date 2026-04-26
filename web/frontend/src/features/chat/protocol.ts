@@ -341,7 +341,7 @@ export function handlePicoMessage(
           return prev.messages.filter((_, index) => index !== fallbackIndex)
         })(),
       }))
-      notifySessionActivity({ sessionId: expectedSessionId, preview: content })
+      notifySessionActivity({ sessionId: expectedSessionId })
       break
     }
 

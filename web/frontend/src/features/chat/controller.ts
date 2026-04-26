@@ -1,6 +1,7 @@
 import { getDefaultStore } from "jotai"
 import { toast } from "sonner"
 
+import { type SessionHistoryError } from "@/api/sessions"
 import {
   loadSessionMessages,
   mergeHistoryMessages,
@@ -14,6 +15,7 @@ import {
   clearStoredSessionId,
   generateSessionId,
   readStoredSessionId,
+  writeStoredSessionId,
 } from "@/features/chat/state"
 import { invalidateSocket, isCurrentSocket } from "@/features/chat/websocket"
 import i18n from "@/i18n"
@@ -43,6 +45,10 @@ function clearReconnectTimer() {
     window.clearTimeout(reconnectTimer)
     reconnectTimer = null
   }
+}
+
+function persistActiveSessionId(sessionId: string) {
+  writeStoredSessionId(sessionId)
 }
 
 function shouldReconnectFor(generation: number, sessionId: string): boolean {
@@ -84,6 +90,19 @@ function needsActiveSessionHydration(): boolean {
 function setActiveSessionId(sessionId: string) {
   activeSessionIdRef = sessionId
   updateChatStore({ activeSessionId: sessionId })
+}
+
+function isMissingStoredSessionError(error: unknown): error is SessionHistoryError {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "status" in error &&
+    (error as { status?: unknown }).status === 404
+  )
+}
+
+function clearRestoreFailureForStoredSession() {
+  clearStoredSessionId()
 }
 
 function disconnectChatInternal({
@@ -300,7 +319,14 @@ export async function hydrateActiveSession() {
       })
     })
     .catch((error) => {
-      console.error("Failed to restore last session history:", error)
+      if (isMissingStoredSessionError(error)) {
+        console.info(
+          "Stored chat session no longer exists; starting a new session instead.",
+          error.sessionId,
+        )
+      } else {
+        console.error("Failed to restore last session history:", error)
+      }
 
       const currentState = getChatState()
       if (currentState.activeSessionId !== storedSessionId) {
@@ -312,11 +338,14 @@ export async function hydrateActiveSession() {
         return
       }
 
-      clearStoredSessionId()
+      const nextSessionId = generateSessionId()
+      clearRestoreFailureForStoredSession()
+      setActiveSessionId(nextSessionId)
       updateChatStore({
         messages: [],
         isTyping: false,
         hasHydratedActiveSession: true,
+        contextUsage: undefined,
       })
     })
     .finally(() => {
@@ -377,6 +406,7 @@ export function sendChatMessage({
         (normalizedAttachments.length > 0 ? "[image]" : ""),
       timestamp: new Date().toISOString(),
     })
+    persistActiveSessionId(activeSessionIdRef)
     socket.send(
       JSON.stringify({
         type: "message.send",
@@ -413,6 +443,7 @@ export async function switchChatSession(
 
     disconnectChatInternal({ clearDesiredConnection: false })
     setActiveSessionId(sessionId)
+    persistActiveSessionId(sessionId)
     updateChatStore({
       messages: historyMessages,
       isTyping: false,

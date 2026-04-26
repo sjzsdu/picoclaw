@@ -340,8 +340,6 @@ func executeReload(
 ) error {
 	defer runningServices.reloading.Store(false)
 
-	overridePicoToken(newCfg, runningServices.authToken)
-
 	return handleConfigReload(ctx, agentLoop, workerPool, newCfg, provider, runningServices, msgBus, allowEmptyStartup, debug)
 }
 

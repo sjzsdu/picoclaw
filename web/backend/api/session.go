@@ -17,6 +17,7 @@ import (
 	"github.com/sipeed/picoclaw/pkg/memory"
 	"github.com/sipeed/picoclaw/pkg/providers"
 	"github.com/sipeed/picoclaw/pkg/providers/messageutil"
+	"github.com/sipeed/picoclaw/pkg/routing"
 	"github.com/sipeed/picoclaw/pkg/session"
 	"github.com/sipeed/picoclaw/pkg/utils"
 )
@@ -554,9 +555,7 @@ func sessionTranscriptMessages(
 			visibleToolMessages := visibleAssistantToolMessages(msg.ToolCalls)
 			if len(visibleToolMessages) > 0 {
 				transcript = append(transcript, visibleToolMessages...)
-				if isPicoSession {
-					pendingPicoToolOutput = visibleToolMessages[len(visibleToolMessages)-1].Content
-				}
+				pendingPicoToolOutput = visibleToolMessages[len(visibleToolMessages)-1].Content
 			}
 
 			// When assistant content exactly matches the rendered tool summary or

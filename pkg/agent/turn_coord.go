@@ -228,6 +228,12 @@ func (al *AgentLoop) runTurn(ctx context.Context, ts *turnState, pipeline *Pipel
 	}
 
 	if finalContent == "" {
+		if ts.channel == "pico" &&
+			(exec.publishedPicoReasoning ||
+				exec.publishedPicoVisibleOutput ||
+				al.picoMessageToolSentToCurrentChat(ts)) {
+			return pipeline.Finalize(ctx, turnCtx, ts, exec, turnStatus, "")
+		}
 		if ts.currentIteration() >= ts.agent.MaxIterations && ts.agent.MaxIterations > 0 {
 			finalContent = toolLimitResponse
 		} else {

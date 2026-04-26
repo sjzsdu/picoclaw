@@ -323,6 +323,12 @@ func (al *AgentLoop) agentForSession(sessionKey string) *AgentInstance {
 		return nil
 	}
 
+	if parsed := session.ParseLegacyAgentSessionKey(sessionKey); parsed != nil {
+		if scopedAgent, ok := registry.GetAgent(parsed.AgentID); ok {
+			return scopedAgent
+		}
+	}
+
 	agentIDs := registry.ListAgentIDs()
 	sort.Strings(agentIDs)
 	for _, agentID := range agentIDs {
@@ -330,12 +336,10 @@ func (al *AgentLoop) agentForSession(sessionKey string) *AgentInstance {
 		if !ok || agent == nil {
 			continue
 		}
-		resolvedAgentID := session.ResolveAgentID(agent.Sessions, sessionKey)
-		if resolvedAgentID == "" {
-			continue
-		}
-		if scopedAgent, ok := registry.GetAgent(resolvedAgentID); ok {
-			return scopedAgent
+		if metaStore, ok := agent.Sessions.(session.MetadataAwareSessionStore); ok {
+			if metaStore.GetSessionScope(sessionKey) != nil {
+				return agent
+			}
 		}
 	}
 

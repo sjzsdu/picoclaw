@@ -266,6 +266,60 @@ func TestProcessMessage_IncludesCurrentSenderInDynamicContext(t *testing.T) {
 	}
 }
 
+func TestProcessMessage_IncludesRuntimeModelInDynamicContext(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				Provider:          "openai",
+				ModelName:         "gpt-friendly",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+		},
+		ModelList: []*config.ModelConfig{
+			{
+				ModelName: "gpt-friendly",
+				Model:     "openai/gpt-5.4",
+			},
+		},
+	}
+
+	msgBus := bus.NewMessageBus()
+	provider := &recordingProvider{}
+	al := NewAgentLoop(cfg, msgBus, provider)
+
+	response, err := al.processMessage(context.Background(), testInboundMessage(bus.InboundMessage{
+		Channel:  "cli",
+		SenderID: "user1",
+		ChatID:   "direct",
+		Content:  "你是什么模型",
+	}))
+	if err != nil {
+		t.Fatalf("processMessage() error = %v", err)
+	}
+	if response != "Mock response" {
+		t.Fatalf("processMessage() response = %q, want %q", response, "Mock response")
+	}
+	if len(provider.lastMessages) == 0 {
+		t.Fatal("provider did not receive any messages")
+	}
+
+	systemPrompt := provider.lastMessages[0].Content
+	for _, want := range []string{
+		"## Current Model",
+		"Model alias: gpt-friendly",
+		"Provider: openai",
+		"Model ID: gpt-5.4",
+		"do not inspect config files",
+	} {
+		if !strings.Contains(systemPrompt, want) {
+			t.Fatalf("system prompt missing model context %q:\n%s", want, systemPrompt)
+		}
+	}
+}
+
 func TestProcessMessage_UseCommandLoadsRequestedSkill(t *testing.T) {
 	tmpDir := t.TempDir()
 	skillDir := filepath.Join(tmpDir, "skills", "shell")
@@ -1316,11 +1370,11 @@ func TestRunAgentLoop_ResponseHandledToolPublishesForUserWhenSendResponseDisable
 		Dispatch: DispatchRequest{
 			SessionKey:  "session-1",
 			UserMessage: "take a screenshot of the screen and send it to me",
-				SessionScope: &session.SessionScope{
-					Version:    session.ScopeVersionV1,
-					Channel:    "telegram",
-					Dimensions: []string{"chat"},
-					Values: map[string]string{
+			SessionScope: &session.SessionScope{
+				Version:    session.ScopeVersionV1,
+				Channel:    "telegram",
+				Dimensions: []string{"chat"},
+				Values: map[string]string{
 					"chat": "direct:chat1",
 				},
 			},
@@ -1391,11 +1445,11 @@ func TestAppendEventContextFields_IncludesInboundRouteAndScope(t *testing.T) {
 				},
 			},
 		},
-			Scope: &session.SessionScope{
-				Version:    session.ScopeVersionV1,
-				Channel:    "slack",
-				Account:    "workspace-a",
-				Dimensions: []string{"chat", "sender"},
+		Scope: &session.SessionScope{
+			Version:    session.ScopeVersionV1,
+			Channel:    "slack",
+			Account:    "workspace-a",
+			Dimensions: []string{"chat", "sender"},
 			Values: map[string]string{
 				"chat":   "channel:c123",
 				"sender": "u123",
@@ -4020,6 +4074,69 @@ func TestProcessMessage_PicoPublishesReasoningAsThoughtMessage(t *testing.T) {
 	}
 }
 
+func TestRun_PicoPublishesDirectFinalResponseOnce(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				ModelName:         "test-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+		},
+	}
+
+	msgBus := bus.NewMessageBus()
+	provider := &reasoningContentProvider{response: "final answer"}
+	al := NewAgentLoop(cfg, msgBus, provider)
+
+	runCtx, runCancel := context.WithCancel(context.Background())
+	defer runCancel()
+
+	runDone := make(chan error, 1)
+	go func() {
+		runDone <- al.Run(runCtx)
+	}()
+
+	if err := msgBus.PublishInbound(context.Background(), bus.InboundMessage{
+		Channel:  "pico",
+		SenderID: "user1",
+		ChatID:   "pico:test-session",
+		Content:  "hello",
+	}); err != nil {
+		t.Fatalf("PublishInbound() error = %v", err)
+	}
+
+	select {
+	case outbound := <-msgBus.OutboundChan():
+		if outbound.Content != "final answer" {
+			t.Fatalf("outbound content = %q, want final answer", outbound.Content)
+		}
+		if outbound.Channel != "pico" || outbound.ChatID != "pico:test-session" {
+			t.Fatalf("outbound route = %s/%s, want pico/pico:test-session", outbound.Channel, outbound.ChatID)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected pico final response")
+	}
+
+	select {
+	case outbound := <-msgBus.OutboundChan():
+		t.Fatalf("unexpected duplicate pico final response: %+v", outbound)
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	runCancel()
+	select {
+	case err := <-runDone:
+		if err != nil {
+			t.Fatalf("Run() error = %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for Run() to exit")
+	}
+}
+
 func TestProcessMessage_PicoReasoningOnlyDoesNotFallbackToEmptyResponseError(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := &config.Config{
@@ -4244,9 +4361,9 @@ func TestProcessMessage_PublishesToolFeedbackWhenEnabled(t *testing.T) {
 		if outbound.SessionKey == "" {
 			t.Fatal("expected tool feedback to carry session_key")
 		}
-			if outbound.Scope == nil || outbound.Scope.Channel != "telegram" {
-				t.Fatalf("expected tool feedback scope, got %+v", outbound.Scope)
-			}
+		if outbound.Scope == nil || outbound.Scope.Channel != "telegram" {
+			t.Fatalf("expected tool feedback scope, got %+v", outbound.Scope)
+		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("expected outbound tool feedback for regular messages")
 	}

@@ -45,32 +45,23 @@ func TestHandleListAgentConfigs_IncludesImplicitMain(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("Unmarshal() error = %v", err)
 	}
-	if resp.DefaultAgent != "support" {
-		t.Fatalf("default_agent = %q, want %q", resp.DefaultAgent, "support")
+	if resp.DefaultAgent != routing.DefaultAgentID {
+		t.Fatalf("default_agent = %q, want %q", resp.DefaultAgent, routing.DefaultAgentID)
 	}
 	if len(resp.Agents) != 2 {
 		t.Fatalf("len(agents) = %d, want 2", len(resp.Agents))
 	}
-	if resp.Agents[0].ID != routing.DefaultAgentID || !resp.Agents[0].IsImplicit {
-		t.Fatalf("main agent = %#v, want implicit main", resp.Agents[0])
+	if resp.Agents[0].ID != routing.DefaultAgentID || !resp.Agents[0].IsImplicit || !resp.Agents[0].IsDefault {
+		t.Fatalf("main agent = %#v, want implicit default main", resp.Agents[0])
 	}
-	if !resp.Agents[1].IsDefault || resp.Agents[1].ID != "support" {
-		t.Fatalf("support agent = %#v, want default support", resp.Agents[1])
+	if resp.Agents[1].IsDefault || resp.Agents[1].ID != "support" {
+		t.Fatalf("support agent = %#v, want non-default support", resp.Agents[1])
 	}
 }
 
-func TestHandleUpdateAgentConfig_ImplicitMainCreatesExplicitConfig(t *testing.T) {
+func TestHandleUpdateAgentConfig_MainRejected(t *testing.T) {
 	configPath, cleanup := setupOAuthTestEnv(t)
 	defer cleanup()
-
-	cfg, err := config.LoadConfig(configPath)
-	if err != nil {
-		t.Fatalf("LoadConfig() error = %v", err)
-	}
-	cfg.Agents.List = []config.AgentConfig{{ID: "support", Name: "Support", Default: true}}
-	if err := config.SaveConfig(configPath, cfg); err != nil {
-		t.Fatalf("SaveConfig() error = %v", err)
-	}
 
 	h := NewHandler(configPath)
 	mux := http.NewServeMux()
@@ -82,23 +73,16 @@ func TestHandleUpdateAgentConfig_ImplicitMainCreatesExplicitConfig(t *testing.T)
 	req.Header.Set("Content-Type", "application/json")
 	mux.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
 	}
 
-	cfg, err = config.LoadConfig(configPath)
+	cfg, err := config.LoadConfig(configPath)
 	if err != nil {
 		t.Fatalf("LoadConfig() error = %v", err)
 	}
-	index, found := findAgentConfig(cfg, routing.DefaultAgentID)
-	if !found {
-		t.Fatalf("expected explicit main config to be created")
-	}
-	if !cfg.Agents.List[index].Default {
-		t.Fatalf("main agent should be default")
-	}
-	if cfg.Agents.List[index].Name != "Main Agent" {
-		t.Fatalf("main name = %q", cfg.Agents.List[index].Name)
+	if _, found := findAgentConfig(cfg, routing.DefaultAgentID); found {
+		t.Fatalf("did not expect explicit main config to be created")
 	}
 }
 

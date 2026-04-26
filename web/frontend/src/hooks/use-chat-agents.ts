@@ -109,11 +109,16 @@ export function useChatAgents(activeSessionId: string) {
     return resolveValidSelectedAgentId(agentIDs, requestedAgentId)
   }, [activeSessionId, agents, sessionSelections])
 
+  const activeAgentId = useMemo(() => {
+    return selectedAgentId === MAIN_AGENT_ID ? "" : selectedAgentId
+  }, [selectedAgentId])
+
   const hasSelectableAgents = useMemo(() => agents.length > 1, [agents])
 
   return {
     agents,
     selectedAgentId,
+    activeAgentId,
     hasSelectableAgents,
     handleSelectAgent,
   }

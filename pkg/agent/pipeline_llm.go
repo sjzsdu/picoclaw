@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sipeed/picoclaw/pkg/bus"
 	"github.com/sipeed/picoclaw/pkg/constants"
 	"github.com/sipeed/picoclaw/pkg/logger"
 	"github.com/sipeed/picoclaw/pkg/providers"
@@ -384,7 +383,8 @@ func (p *Pipeline) CallLLM(
 
 	reasoningContent := responseReasoningContent(exec.response)
 	if ts.channel == "pico" {
-		go al.publishPicoReasoning(turnCtx, reasoningContent, ts.chatID)
+		exec.publishedPicoReasoning = strings.TrimSpace(reasoningContent) != ""
+		go al.publishPicoReasoning(turnCtx, reasoningContent, ts.chatID, ts.agent.ID)
 	} else {
 		go al.handleReasoning(
 			turnCtx,
@@ -424,23 +424,12 @@ func (p *Pipeline) CallLLM(
 		len(exec.response.ToolCalls) > 0 &&
 		ts.opts.AllowInterimPicoPublish &&
 		!shouldPublishToolFeedback(al.cfg, ts) {
+		exec.pendingPicoInterimContent = ""
 		if strings.TrimSpace(exec.response.Content) != "" {
-			outCtx, outCancel := context.WithTimeout(turnCtx, 3*time.Second)
-			publishErr := al.bus.PublishOutbound(outCtx, bus.OutboundMessage{
-				Channel: ts.channel,
-				ChatID:  ts.chatID,
-				Content: exec.response.Content,
-			})
-			outCancel()
-			if publishErr != nil {
-				logger.WarnCF("agent", "Failed to publish pico interim tool-call content", map[string]any{
-					"error":     publishErr.Error(),
-					"channel":   ts.channel,
-					"chat_id":   ts.chatID,
-					"iteration": iteration,
-				})
-			}
+			exec.pendingPicoInterimContent = exec.response.Content
 		}
+	} else {
+		exec.pendingPicoInterimContent = ""
 	}
 
 	// No-tool-call path: steering check and direct response

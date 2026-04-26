@@ -1,5 +1,17 @@
 import { launcherFetch } from "@/api/http"
 
+export class SessionHistoryError extends Error {
+  readonly sessionId: string
+  readonly status: number
+
+  constructor(sessionId: string, status: number) {
+    super(`Failed to fetch session ${sessionId}: ${status}`)
+    this.name = "SessionHistoryError"
+    this.sessionId = sessionId
+    this.status = status
+  }
+}
+
 export interface SessionSummary {
   id: string
   title: string
@@ -52,7 +64,7 @@ export async function getSessions(
 export async function getSessionHistory(id: string): Promise<SessionDetail> {
   const res = await launcherFetch(`/api/sessions/${encodeURIComponent(id)}`)
   if (!res.ok) {
-    throw new Error(`Failed to fetch session ${id}: ${res.status}`)
+    throw new SessionHistoryError(id, res.status)
   }
   return res.json()
 }

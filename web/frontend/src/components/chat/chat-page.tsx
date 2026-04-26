@@ -1,6 +1,6 @@
 import { IconArrowDown, IconPlus } from "@tabler/icons-react"
 import { useAtom } from "jotai"
-import { useNavigate, useSearch } from "@tanstack/react-router"
+import { useNavigate } from "@tanstack/react-router"
 import { type ChangeEvent, useEffect, useMemo, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
@@ -118,7 +118,7 @@ export function ChatPage() {
   const { state: gwState } = useGateway()
   const isGatewayRunning = gwState === "running"
   const isChatConnected = connectionState === "connected"
-  const { agents, selectedAgentId, hasSelectableAgents, handleSelectAgent } =
+  const { agents, selectedAgentId, activeAgentId, hasSelectableAgents, handleSelectAgent } =
     useChatAgents(activeSessionId)
   const agentNameById = useMemo(
     () =>
@@ -135,6 +135,7 @@ export function ChatPage() {
     oauthModels,
     localModels,
     handleSetDefault,
+    loadError,
   } = useChatModels({
     isConnected: isGatewayRunning,
     activeSessionId,
@@ -252,7 +253,7 @@ export function ChatPage() {
       sendMessage({
         content: input,
         attachments,
-        agentId: selectedAgentId || undefined,
+        agentId: activeAgentId || undefined,
       })
     ) {
       setInput("")
@@ -410,6 +411,7 @@ export function ChatPage() {
                 hasAvailableModels={hasAvailableModels}
                 defaultModelName={defaultModelName}
                 isConnected={isGatewayRunning}
+                loadError={loadError}
               />
             )}
 

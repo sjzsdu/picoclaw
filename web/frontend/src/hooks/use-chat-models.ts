@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { toast } from "sonner"
 
 import { type ModelInfo, getModels, setDefaultModel } from "@/api/models"
 
@@ -24,17 +25,22 @@ export function useChatModels({
 }: UseChatModelsOptions) {
   const [modelList, setModelList] = useState<ModelInfo[]>([])
   const [defaultModelName, setDefaultModelName] = useState("")
+  const [loadError, setLoadError] = useState<string | null>(null)
   const setDefaultRequestIdRef = useRef(0)
 
   const loadModels = useCallback(async () => {
     try {
+      setLoadError(null)
       const data = await getModels()
       setModelList(data.models)
       if (data.models.some((m) => m.model_name === data.default_model)) {
         setDefaultModelName(data.default_model)
       }
-    } catch {
-      // silently fail
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unknown error"
+      console.error("Failed to load models:", msg)
+      setLoadError(msg)
+      toast.error("Failed to load models. Please check your connection and refresh.")
     }
   }, [])
 
@@ -99,5 +105,6 @@ export function useChatModels({
     oauthModels,
     localModels,
     handleSetDefault,
+    loadError,
   }
 }

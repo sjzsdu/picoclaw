@@ -64,8 +64,16 @@ func TestNewAgentRegistry_ExplicitAgents(t *testing.T) {
 	registry := NewAgentRegistry(cfg, &mockRegistryProvider{})
 
 	ids := registry.ListAgentIDs()
-	if len(ids) != 2 {
-		t.Fatalf("expected 2 agents, got %d: %v", len(ids), ids)
+	if len(ids) != 3 {
+		t.Fatalf("expected 3 agents including implicit main, got %d: %v", len(ids), ids)
+	}
+
+	main, ok := registry.GetAgent("main")
+	if !ok || main == nil {
+		t.Fatal("expected to find implicit 'main' agent")
+	}
+	if main.Model != "gpt-4" {
+		t.Errorf("main.Model = %q, want 'gpt-4'", main.Model)
 	}
 
 	sales, ok := registry.GetAgent("sales")
@@ -79,6 +87,31 @@ func TestNewAgentRegistry_ExplicitAgents(t *testing.T) {
 	support, ok := registry.GetAgent("support")
 	if !ok || support == nil {
 		t.Fatal("expected to find 'support' agent")
+	}
+}
+
+func TestAgentRegistry_ExplicitMainInListIsIgnored(t *testing.T) {
+	model := &config.AgentModelConfig{Primary: "claude-opus"}
+	cfg := testCfg([]config.AgentConfig{
+		{ID: "main", Default: true, Name: "Configured Main", Model: model},
+		{ID: "support", Name: "Support Bot"},
+	})
+	registry := NewAgentRegistry(cfg, &mockRegistryProvider{})
+
+	ids := registry.ListAgentIDs()
+	if len(ids) != 2 {
+		t.Fatalf("expected 2 agents (implicit main + support), got %d: %v", len(ids), ids)
+	}
+
+	main, ok := registry.GetAgent("main")
+	if !ok || main == nil {
+		t.Fatal("expected to find main agent")
+	}
+	if main.Name != "Main" {
+		t.Fatalf("main.Name = %q, want %q", main.Name, "Main")
+	}
+	if main.Model != "gpt-4" {
+		t.Fatalf("main.Model = %q, want %q", main.Model, "gpt-4")
 	}
 }
 
@@ -104,10 +137,15 @@ func TestAgentRegistry_GetDefaultAgent(t *testing.T) {
 	})
 	registry := NewAgentRegistry(cfg, &mockRegistryProvider{})
 
-	// GetDefaultAgent first checks for "main", then returns any
 	agent := registry.GetDefaultAgent()
 	if agent == nil {
 		t.Fatal("expected a default agent")
+	}
+	if agent.ID != "main" {
+		t.Fatalf("default agent ID = %q, want %q", agent.ID, "main")
+	}
+	if agent.Model != "gpt-4" {
+		t.Fatalf("default agent model = %q, want %q", agent.Model, "gpt-4")
 	}
 }
 
@@ -162,13 +200,11 @@ func TestAgentRegistry_CanSpawnSubagent_Wildcard(t *testing.T) {
 }
 
 func TestAgentInstance_Model(t *testing.T) {
-	model := &config.AgentModelConfig{Primary: "claude-opus"}
-	cfg := testCfg([]config.AgentConfig{
-		{ID: "custom", Default: true, Model: model},
-	})
+	cfg := testCfg(nil)
+	cfg.Agents.Defaults.ModelName = "claude-opus"
 	registry := NewAgentRegistry(cfg, &mockRegistryProvider{})
 
-	agent, _ := registry.GetAgent("custom")
+	agent, _ := registry.GetAgent("main")
 	if agent.Model != "claude-opus" {
 		t.Errorf("agent.Model = %q, want 'claude-opus'", agent.Model)
 	}

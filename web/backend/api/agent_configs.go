@@ -108,7 +108,7 @@ func (h *Handler) handleCreateAgentConfig(w http.ResponseWriter, r *http.Request
 	}
 
 	cfg.Agents.List = append(cfg.Agents.List, *agentCfg)
-	applyDefaultAgentSelection(cfg, agentID, req.IsDefault)
+	applyDefaultAgentSelection(cfg)
 	if err := validateAndSaveAgentConfig(h.configPath, cfg); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -155,7 +155,7 @@ func (h *Handler) handleUpdateAgentConfig(w http.ResponseWriter, r *http.Request
 	} else {
 		cfg.Agents.List = append([]config.AgentConfig{*agentCfg}, cfg.Agents.List...)
 	}
-	applyDefaultAgentSelection(cfg, agentID, req.IsDefault)
+	applyDefaultAgentSelection(cfg)
 	if err := validateAndSaveAgentConfig(h.configPath, cfg); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -211,30 +211,27 @@ func decodeAgentConfigRequest(w http.ResponseWriter, r *http.Request) (agentConf
 
 func buildAgentConfigResponses(cfg *config.Config, defaultAgentID string) []agentConfigResponse {
 	responses := make([]agentConfigResponse, 0, len(cfg.Agents.List)+1)
-	mainIncluded := false
 	for index := range cfg.Agents.List {
 		id := routing.NormalizeAgentID(cfg.Agents.List[index].ID)
-		responses = append(responses, buildAgentConfigResponse(cfg, &cfg.Agents.List[index], index, false, defaultAgentID))
 		if id == routing.DefaultAgentID {
-			mainIncluded = true
+			continue
 		}
+		responses = append(responses, buildAgentConfigResponse(cfg, &cfg.Agents.List[index], index, false, defaultAgentID))
 	}
-	if !mainIncluded {
-		implicitMain := config.AgentConfig{ID: routing.DefaultAgentID, Name: "Main"}
-		responses = append([]agentConfigResponse{buildAgentConfigResponse(cfg, &implicitMain, -1, true, defaultAgentID)}, responses...)
-	}
+	implicitMain := config.AgentConfig{ID: routing.DefaultAgentID, Name: "Main"}
+	responses = append([]agentConfigResponse{buildAgentConfigResponse(cfg, &implicitMain, -1, true, defaultAgentID)}, responses...)
 	return responses
 }
 
 func getAgentConfigResponse(cfg *config.Config, agentID string) (agentConfigResponse, bool) {
 	defaultAgentID := configuredDefaultAgentID(cfg)
 	norm := routing.NormalizeAgentID(agentID)
-	if index, found := findAgentConfig(cfg, norm); found {
-		return buildAgentConfigResponse(cfg, &cfg.Agents.List[index], index, false, defaultAgentID), true
-	}
 	if norm == routing.DefaultAgentID {
 		implicitMain := config.AgentConfig{ID: routing.DefaultAgentID, Name: "Main"}
 		return buildAgentConfigResponse(cfg, &implicitMain, -1, true, defaultAgentID), true
+	}
+	if index, found := findAgentConfig(cfg, norm); found {
+		return buildAgentConfigResponse(cfg, &cfg.Agents.List[index], index, false, defaultAgentID), true
 	}
 	return agentConfigResponse{}, false
 }
@@ -260,7 +257,7 @@ func buildAgentConfigResponse(cfg *config.Config, agentCfg *config.AgentConfig, 
 		Name:               name,
 		IsMain:             id == routing.DefaultAgentID,
 		IsImplicit:         isImplicit,
-		IsDefault:          id == defaultAgentID,
+		IsDefault:          id == routing.DefaultAgentID,
 		ModelName:          modelName,
 		ModelFallbacks:     modelFallbacks,
 		EffectiveModel:     effectiveAgentModelName(*agentCfg, cfg.Agents.Defaults),
@@ -285,18 +282,13 @@ func findAgentConfig(cfg *config.Config, agentID string) (int, bool) {
 }
 
 func configuredDefaultAgentID(cfg *config.Config) string {
-	if len(cfg.Agents.List) == 0 {
-		return routing.DefaultAgentID
-	}
-	for _, agent := range cfg.Agents.List {
-		if agent.Default {
-			return routing.NormalizeAgentID(agent.ID)
-		}
-	}
-	return routing.NormalizeAgentID(cfg.Agents.List[0].ID)
+	return routing.DefaultAgentID
 }
 
 func buildManagedAgentConfig(cfg *config.Config, req agentConfigRequest, agentID string, previous *config.AgentConfig) (*config.AgentConfig, error) {
+	if agentID == routing.DefaultAgentID {
+		return nil, fmt.Errorf("main agent is derived from agents.defaults and cannot be managed in agents.list")
+	}
 	if strings.TrimSpace(req.Name) == "" {
 		return nil, fmt.Errorf("name is required")
 	}
@@ -316,7 +308,7 @@ func buildManagedAgentConfig(cfg *config.Config, req agentConfigRequest, agentID
 	agentCfg.Name = strings.TrimSpace(req.Name)
 	agentCfg.Workspace = strings.TrimSpace(req.Workspace)
 	agentCfg.Skills = normalizeStringList(req.Skills)
-	agentCfg.Default = req.IsDefault
+	agentCfg.Default = false
 	if strings.TrimSpace(req.ModelName) == "" {
 		agentCfg.Model = nil
 	} else {
@@ -328,21 +320,9 @@ func buildManagedAgentConfig(cfg *config.Config, req agentConfigRequest, agentID
 	return &agentCfg, nil
 }
 
-func applyDefaultAgentSelection(cfg *config.Config, defaultAgentID string, requested bool) {
-	if !requested {
-		return
-	}
-	if defaultAgentID == routing.DefaultAgentID {
-		if _, found := findAgentConfig(cfg, defaultAgentID); !found {
-			cfg.Agents.List = append([]config.AgentConfig{{
-				ID:      routing.DefaultAgentID,
-				Name:    "Main",
-				Default: true,
-			}}, cfg.Agents.List...)
-		}
-	}
+func applyDefaultAgentSelection(cfg *config.Config) {
 	for index := range cfg.Agents.List {
-		cfg.Agents.List[index].Default = routing.NormalizeAgentID(cfg.Agents.List[index].ID) == routing.NormalizeAgentID(defaultAgentID)
+		cfg.Agents.List[index].Default = false
 	}
 }
 
@@ -362,17 +342,16 @@ func validateAndSaveAgentConfig(configPath string, cfg *config.Config) error {
 func validateManagedAgentList(cfg *config.Config) []string {
 	var errs []string
 	seen := make(map[string]struct{})
-	defaultCount := 0
 	for _, agent := range cfg.Agents.List {
 		id := routing.NormalizeAgentID(agent.ID)
+		if id == routing.DefaultAgentID {
+			continue
+		}
 		if _, exists := seen[id]; exists {
 			errs = append(errs, fmt.Sprintf("duplicate agent id %q", id))
 			continue
 		}
 		seen[id] = struct{}{}
-		if agent.Default {
-			defaultCount++
-		}
 		if strings.TrimSpace(agent.Name) == "" {
 			errs = append(errs, fmt.Sprintf("agent %q must have a name", id))
 		}
@@ -389,9 +368,6 @@ func validateManagedAgentList(cfg *config.Config) []string {
 				}
 			}
 		}
-	}
-	if defaultCount > 1 {
-		errs = append(errs, "only one agent can be marked as default")
 	}
 	return errs
 }

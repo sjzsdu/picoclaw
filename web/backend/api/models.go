@@ -490,7 +490,7 @@ func (h *Handler) handleTestAllModels(w http.ResponseWriter, r *http.Request) {
 		if modelCfg == nil || modelCfg.IsVirtual() {
 			continue
 		}
-		if providerFilter != "" && modelProtocol(modelCfg.Model) != providerFilter {
+		if providerFilter != "" && modelProtocol(modelCfg) != providerFilter {
 			continue
 		}
 		if !hasModelConfiguration(modelCfg) {

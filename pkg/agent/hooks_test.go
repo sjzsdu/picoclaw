@@ -1182,7 +1182,6 @@ func TestAgentLoop_HookRespond_ResponseHandledMediaPreservesOutboundContext(t *t
 			SessionKey: "session-topic-media",
 			SessionScope: &session.SessionScope{
 				Version:    session.ScopeVersionV1,
-				AgentID:    agent.ID,
 				Channel:    "telegram",
 				Dimensions: []string{"chat"},
 				Values: map[string]string{

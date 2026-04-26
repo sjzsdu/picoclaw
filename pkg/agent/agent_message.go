@@ -72,6 +72,44 @@ func (al *AgentLoop) ProcessDirectWithChannel(
 	return al.processMessage(ctx, msg)
 }
 
+func (al *AgentLoop) ProcessDirectForAgent(
+	ctx context.Context,
+	content, sessionKey, agentID string,
+) (string, error) {
+	return al.ProcessDirectWithTarget(ctx, content, sessionKey, agentID, "cli", "direct")
+}
+
+func (al *AgentLoop) ProcessDirectWithTarget(
+	ctx context.Context,
+	content, sessionKey, agentID, channel, chatID string,
+) (string, error) {
+	if err := al.ensureHooksInitialized(ctx); err != nil {
+		return "", err
+	}
+	if err := al.ensureMCPInitialized(ctx); err != nil {
+		return "", err
+	}
+
+	raw := map[string]string{}
+	if trimmed := strings.TrimSpace(agentID); trimmed != "" {
+		raw["agent_id"] = trimmed
+	}
+
+	msg := bus.InboundMessage{
+		Context: bus.InboundContext{
+			Channel:  channel,
+			ChatID:   chatID,
+			ChatType: "direct",
+			SenderID: "cron",
+			Raw:      raw,
+		},
+		Content:    content,
+		SessionKey: sessionKey,
+	}
+
+	return al.processMessage(ctx, msg)
+}
+
 func (al *AgentLoop) ProcessHeartbeat(
 	ctx context.Context,
 	content, channel, chatID string,
@@ -150,10 +188,11 @@ func (al *AgentLoop) processMessage(ctx context.Context, msg bus.InboundMessage)
 		return "", routeErr
 	}
 
-	// CLI/direct channel messages must bypass routing and use the default agent.
-	// This preserves current-branch route/session conventions while ensuring
-	// command-channel messages (CLI) don't get dispatched to a non-default agent.
-	if msg.Context.Channel == "cli" || msg.Context.Channel == "direct" {
+	forcedAgentID := strings.TrimSpace(msg.Context.Raw["agent_id"])
+
+	// CLI/direct channel messages must bypass routing and use the default agent,
+	// unless the caller explicitly forced a target agent.
+	if forcedAgentID == "" && (msg.Context.Channel == "cli" || msg.Context.Channel == "direct") {
 		if def := al.GetRegistry().GetDefaultAgent(); def != nil {
 			agent = def
 			// Ensure the route snapshot reflects the default agent as well.
@@ -264,7 +303,6 @@ func (al *AgentLoop) processSystemMessage(
 			"chat_id":   msg.ChatID,
 		})
 
-	// Parse origin channel from chat_id (format: "channel:chat_id")
 	var originChannel, originChatID string
 	if idx := strings.Index(msg.ChatID, ":"); idx > 0 {
 		originChannel = msg.ChatID[:idx]
@@ -274,14 +312,11 @@ func (al *AgentLoop) processSystemMessage(
 		originChatID = msg.ChatID
 	}
 
-	// Extract subagent result from message content
-	// Format: "Task 'label' completed.\n\nResult:\n<actual content>"
 	content := msg.Content
 	if idx := strings.Index(content, "Result:\n"); idx >= 0 {
-		content = content[idx+8:] // Extract just the result part
+		content = content[idx+8:]
 	}
 
-	// Skip internal channels - only log, don't send to user
 	if constants.IsInternalChannel(originChannel) {
 		logger.InfoCF("agent", "Subagent completed (internal channel)",
 			map[string]any{
@@ -292,13 +327,11 @@ func (al *AgentLoop) processSystemMessage(
 		return "", nil
 	}
 
-	// Use default agent for system messages
 	agent := al.GetRegistry().GetDefaultAgent()
 	if agent == nil {
 		return "", fmt.Errorf("no default agent for system message")
 	}
 
-	// Use the origin session for context
 	sessionKey := session.BuildMainSessionKey(agent.ID)
 	dispatch := DispatchRequest{
 		SessionKey:  sessionKey,

@@ -53,14 +53,16 @@ func buildAgentResponses(cfg *config.Config, defaultAgentID string) []agentRespo
 	mainAgent := agentResponse{
 		ID:          routing.DefaultAgentID,
 		Name:        "Main",
-		IsDefault:   defaultAgentID == routing.DefaultAgentID,
+		IsDefault:   true,
 		ModelName:   cfg.Agents.Defaults.GetModelName(),
 		SkillsCount: 0,
 	}
-	mainIncluded := false
 
 	for _, agent := range cfg.Agents.List {
 		id := routing.NormalizeAgentID(agent.ID)
+		if id == routing.DefaultAgentID {
+			continue
+		}
 		name := agent.Name
 		if name == "" {
 			name = id
@@ -69,23 +71,15 @@ func buildAgentResponses(cfg *config.Config, defaultAgentID string) []agentRespo
 		response := agentResponse{
 			ID:          id,
 			Name:        name,
-			IsDefault:   id == defaultAgentID,
+			IsDefault:   false,
 			ModelName:   effectiveAgentModelName(agent, cfg.Agents.Defaults),
 			SkillsCount: len(agent.Skills),
-		}
-		if id == routing.DefaultAgentID {
-			mainAgent = response
-			mainAgent.IsDefault = defaultAgentID == routing.DefaultAgentID
-			mainIncluded = true
-			continue
 		}
 		others = append(others, response)
 	}
 
 	agents := make([]agentResponse, 0, len(others)+1)
-	if mainIncluded || len(cfg.Agents.List) == 0 || defaultAgentID == routing.DefaultAgentID {
-		agents = append(agents, mainAgent)
-	}
+	agents = append(agents, mainAgent)
 	agents = append(agents, others...)
 
 	return agents

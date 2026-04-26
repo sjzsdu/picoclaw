@@ -29,28 +29,30 @@ func NewAgentRegistry(
 	}
 
 	agentConfigs := cfg.Agents.List
-	if len(agentConfigs) == 0 {
-		implicitAgent := &config.AgentConfig{
-			ID:      "main",
-			Default: true,
+	mainConfig := &config.AgentConfig{
+		ID:      routing.DefaultAgentID,
+		Default: true,
+		Name:    "Main",
+	}
+	logger.InfoCF("agent", "Created implicit main agent", nil)
+	mainInstance := NewAgentInstance(mainConfig, &cfg.Agents.Defaults, cfg, provider)
+	registry.agents[routing.DefaultAgentID] = mainInstance
+
+	for i := range agentConfigs {
+		ac := &agentConfigs[i]
+		id := routing.NormalizeAgentID(ac.ID)
+		if id == routing.DefaultAgentID {
+			continue
 		}
-		instance := NewAgentInstance(implicitAgent, &cfg.Agents.Defaults, cfg, provider)
-		registry.agents["main"] = instance
-		logger.InfoCF("agent", "Created implicit main agent (no agents.list configured)", nil)
-	} else {
-		for i := range agentConfigs {
-			ac := &agentConfigs[i]
-			id := routing.NormalizeAgentID(ac.ID)
-			instance := NewAgentInstance(ac, &cfg.Agents.Defaults, cfg, provider)
-			registry.agents[id] = instance
-			logger.InfoCF("agent", "Registered agent",
-				map[string]any{
-					"agent_id":  id,
-					"name":      ac.Name,
-					"workspace": instance.Workspace,
-					"model":     instance.Model,
-				})
-		}
+		instance := NewAgentInstance(ac, &cfg.Agents.Defaults, cfg, provider)
+		registry.agents[id] = instance
+		logger.InfoCF("agent", "Registered agent",
+			map[string]any{
+				"agent_id":  id,
+				"name":      ac.Name,
+				"workspace": instance.Workspace,
+				"model":     instance.Model,
+			})
 	}
 
 	return registry
@@ -131,11 +133,5 @@ func (r *AgentRegistry) Close() {
 func (r *AgentRegistry) GetDefaultAgent() *AgentInstance {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	if agent, ok := r.agents["main"]; ok {
-		return agent
-	}
-	for _, agent := range r.agents {
-		return agent
-	}
-	return nil
+	return r.agents[routing.DefaultAgentID]
 }
