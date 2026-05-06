@@ -260,6 +260,23 @@ export function ChatPage() {
     }
   }
 
+  const handleQuickPrompt = (prompt: string) => {
+    if (!canSend) {
+      setInput(prompt)
+      return
+    }
+    if (
+      sendMessage({
+        content: prompt,
+        attachments: [],
+        agentId: activeAgentId || undefined,
+      })
+    ) {
+      setInput("")
+      setAttachments([])
+    }
+  }
+
   const handleAddImages = () => {
     if (!canSend) return
     fileInputRef.current?.click()
@@ -421,6 +438,7 @@ export function ChatPage() {
                       msg.agentId ? agentNameById.get(msg.agentId) : undefined
                     }
                     modelName={msg.modelName}
+                    onQuickPrompt={handleQuickPrompt}
                   />
                 ) : (
                   <UserMessage

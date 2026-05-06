@@ -19,6 +19,56 @@ import { formatMessageTime } from "@/hooks/use-pico-chat"
 import { cn } from "@/lib/utils"
 import { type ChatAttachment } from "@/store/chat"
 
+const FOLLOW_UP_PREFIXES = [
+  "如果你愿意",
+  "如果需要",
+  "如果你需要",
+  "你要的话",
+  "需要的话",
+]
+
+function stripWrappingQuote(text: string) {
+  return text
+    .trim()
+    .replace(/^[“”"'「『]+/, "")
+    .replace(/[“”"'」』。，,.\s]+$/, "")
+}
+
+function extractFollowUpPrompt(content: string): string | null {
+  const normalized = content.trim()
+  if (!normalized) {
+    return null
+  }
+
+  const lines = normalized
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+  const tail = lines.slice(-4).join("\n")
+  if (!FOLLOW_UP_PREFIXES.some((prefix) => tail.includes(prefix))) {
+    return null
+  }
+
+  const quoted = tail.match(/[“"「『]([^”"」』]{6,120})[”"」』]/)
+  if (quoted?.[1]) {
+    return `请直接给我这份：${stripWrappingQuote(quoted[1])}`
+  }
+
+  const colonIndex = Math.max(tail.lastIndexOf("："), tail.lastIndexOf(":"))
+  if (colonIndex >= 0) {
+    const afterColon = stripWrappingQuote(tail.slice(colonIndex + 1))
+    if (afterColon.length >= 6 && afterColon.length <= 120) {
+      return `请直接给我这份：${afterColon}`
+    }
+  }
+
+  if (/下一条|直接给你|我可以/.test(tail)) {
+    return "请继续，直接给我你刚才提到的内容"
+  }
+
+  return null
+}
+
 interface AssistantMessageProps {
   content: string
   attachments?: ChatAttachment[]
@@ -27,6 +77,7 @@ interface AssistantMessageProps {
   agentId?: string
   agentName?: string
   modelName?: string
+  onQuickPrompt?: (prompt: string) => void
 }
 
 export function AssistantMessage({
@@ -37,6 +88,7 @@ export function AssistantMessage({
   agentId,
   agentName,
   modelName,
+  onQuickPrompt,
 }: AssistantMessageProps) {
   const { t } = useTranslation()
   const [isCopied, setIsCopied] = useState(false)
@@ -44,13 +96,16 @@ export function AssistantMessage({
   const hasText = content.trim().length > 0
   const formattedTimestamp =
     timestamp !== "" ? formatMessageTime(timestamp) : ""
-  const senderLabel = [agentName || agentId, modelName].filter(Boolean).join(" · ")
+  const senderLabel = [agentName || agentId, modelName]
+    .filter(Boolean)
+    .join(" · ")
   const imageAttachments = attachments.filter(
     (attachment) => attachment.type === "image",
   )
   const fileAttachments = attachments.filter(
     (attachment) => attachment.type !== "image",
   )
+  const followUpPrompt = !isThought ? extractFollowUpPrompt(content) : null
 
   const handleCopy = () => {
     navigator.clipboard.writeText(content).then(() => {
@@ -122,7 +177,7 @@ export function AssistantMessage({
           {(!isThought || isThoughtExpanded) && hasText && (
             <div
               className={cn(
-                "prose prose-sm dark:prose-invert prose-headings:my-2 prose-p:leading-normal prose-ul:my-1.5 prose-ol:my-1.5 prose-li:my-0.5 prose-blockquote:my-2 prose-hr:my-3 prose-table:my-2 prose-pre:my-2 prose-pre:overflow-x-auto prose-pre:rounded-lg prose-pre:border prose-pre:bg-zinc-100 prose-pre:p-0 prose-pre:text-zinc-900 max-w-none [overflow-wrap:anywhere] break-words dark:prose-pre:bg-zinc-950 dark:prose-pre:text-zinc-100",
+                "prose prose-sm dark:prose-invert prose-headings:my-2 prose-p:leading-normal prose-ul:my-1.5 prose-ol:my-1.5 prose-li:my-0.5 prose-blockquote:my-2 prose-hr:my-3 prose-table:my-2 prose-pre:my-2 prose-pre:overflow-x-auto prose-pre:rounded-lg prose-pre:border prose-pre:bg-zinc-100 prose-pre:p-0 prose-pre:text-zinc-900 dark:prose-pre:bg-zinc-950 dark:prose-pre:text-zinc-100 max-w-none [overflow-wrap:anywhere] break-words",
                 isThought
                   ? "prose-p:my-1 prose-p:whitespace-pre-wrap p-2.5 text-[12px] leading-normal text-amber-950/90 dark:text-amber-50/90"
                   : "prose-p:my-1.5 prose-p:whitespace-pre-wrap p-3 text-[14px] leading-normal",
@@ -161,6 +216,24 @@ export function AssistantMessage({
         </div>
       )}
 
+      {followUpPrompt && onQuickPrompt && (
+        <div className="flex px-1">
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            className="border-border/60 bg-background/80 h-7 max-w-full gap-1.5 rounded-full border px-2.5 text-xs font-normal shadow-sm"
+            onClick={() => onQuickPrompt(followUpPrompt)}
+            title={followUpPrompt}
+          >
+            <span className="shrink-0">继续生成</span>
+            <span className="text-muted-foreground max-w-80 truncate">
+              {followUpPrompt.replace(/^请直接给我这份：/, "")}
+            </span>
+          </Button>
+        </div>
+      )}
+
       {imageAttachments.length > 0 && (
         <div className="mt-1 flex flex-wrap gap-2">
           {imageAttachments.map((attachment, index) => (
@@ -169,7 +242,7 @@ export function AssistantMessage({
               href={attachment.url}
               target="_blank"
               rel="noreferrer"
-              className="group/img relative overflow-hidden rounded-xl border border-border/50 bg-muted/30 shadow-sm transition-colors hover:border-border/80"
+              className="group/img border-border/50 bg-muted/30 hover:border-border/80 relative overflow-hidden rounded-xl border shadow-sm transition-colors"
             >
               <img
                 src={attachment.url}
@@ -189,20 +262,21 @@ export function AssistantMessage({
               key={`${attachment.url}-${index}`}
               href={attachment.url}
               download={attachment.filename}
-              className="group/file flex w-fit min-w-[220px] max-w-sm items-center gap-3.5 rounded-xl border border-border/60 bg-card px-4 py-3 transition-all duration-300 hover:-translate-y-0.5 hover:border-violet-500/30 hover:shadow-sm dark:hover:border-violet-500/40"
+              className="group/file border-border/60 bg-card flex w-fit max-w-sm min-w-[220px] items-center gap-3.5 rounded-xl border px-4 py-3 transition-all duration-300 hover:-translate-y-0.5 hover:border-violet-500/30 hover:shadow-sm dark:hover:border-violet-500/40"
             >
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-violet-400 ring-1 ring-violet-500/10 dark:bg-violet-500/10 dark:text-violet-400 dark:ring-violet-500/30">
                 <IconFileText className="h-5 w-5" />
               </div>
               <div className="flex min-w-0 flex-1 flex-col pr-1">
-                <span className="truncate text-[14px] font-medium leading-tight text-foreground/90 transition-colors group-hover/file:text-violet-600 dark:group-hover/file:text-violet-400">
+                <span className="text-foreground/90 truncate text-[14px] leading-tight font-medium transition-colors group-hover/file:text-violet-600 dark:group-hover/file:text-violet-400">
                   {attachment.filename || "Download file"}
                 </span>
-                <span className="mt-1 text-[12px] font-medium text-muted-foreground/70">
-                  {attachment.filename?.split(".").pop()?.toUpperCase() || "FILE"}
+                <span className="text-muted-foreground/70 mt-1 text-[12px] font-medium">
+                  {attachment.filename?.split(".").pop()?.toUpperCase() ||
+                    "FILE"}
                 </span>
               </div>
-              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted/60 text-muted-foreground/50 transition-all duration-300 group-hover/file:bg-violet-400 group-hover/file:text-white group-hover/file:shadow-sm dark:bg-muted/20 dark:group-hover/file:bg-violet-400">
+              <div className="bg-muted/60 text-muted-foreground/50 dark:bg-muted/20 flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-all duration-300 group-hover/file:bg-violet-400 group-hover/file:text-white group-hover/file:shadow-sm dark:group-hover/file:bg-violet-400">
                 <IconDownload className="h-4 w-4 transition-transform duration-300 group-hover/file:-translate-y-[1px]" />
               </div>
             </a>
