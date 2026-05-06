@@ -24,6 +24,7 @@ func (p *Pipeline) SetupTurn(ctx context.Context, ts *turnState) (*turnExecution
 			SessionKey: ts.sessionKey,
 			Budget:     ts.agent.ContextWindow,
 			MaxTokens:  ts.agent.MaxTokens,
+			Agent:      ts.agent,
 		}); err == nil && resp != nil {
 			history = resp.History
 			summary = resp.Summary
@@ -46,6 +47,7 @@ func (p *Pipeline) SetupTurn(ctx context.Context, ts *turnState) (*turnExecution
 				SessionKey: ts.sessionKey,
 				Reason:     ContextCompressReasonProactive,
 				Budget:     ts.agent.ContextWindow,
+				Agent:      ts.agent,
 			}); err != nil {
 				logger.WarnCF("agent", "Proactive compact failed", map[string]any{
 					"session_key": ts.sessionKey,
@@ -57,6 +59,7 @@ func (p *Pipeline) SetupTurn(ctx context.Context, ts *turnState) (*turnExecution
 				SessionKey: ts.sessionKey,
 				Budget:     ts.agent.ContextWindow,
 				MaxTokens:  ts.agent.MaxTokens,
+				Agent:      ts.agent,
 			}); err == nil && resp != nil {
 				history = resp.History
 				summary = resp.Summary

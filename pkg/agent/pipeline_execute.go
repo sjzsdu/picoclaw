@@ -722,6 +722,7 @@ toolLoop:
 				SessionKey: ts.sessionKey,
 				Reason:     ContextCompressReasonSummarize,
 				Budget:     ts.agent.ContextWindow,
+				Agent:      ts.agent,
 			})
 		}
 		ts.setPhase(TurnPhaseCompleted)

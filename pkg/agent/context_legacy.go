@@ -19,11 +19,18 @@ type legacyContextManager struct {
 	summarizing sync.Map // dedup for async Compact (post-turn)
 }
 
+func (m *legacyContextManager) requestAgent(agent *AgentInstance) *AgentInstance {
+	if agent != nil {
+		return agent
+	}
+	return m.al.registry.GetDefaultAgent()
+}
+
 func (m *legacyContextManager) Assemble(_ context.Context, req *AssembleRequest) (*AssembleResponse, error) {
 	// Legacy: read history from session, return as-is.
 	// Budget enforcement happens in BuildMessages caller via
 	// isOverContextBudget + forceCompression.
-	agent := m.al.registry.GetDefaultAgent()
+	agent := m.requestAgent(req.Agent)
 	if agent == nil {
 		return &AssembleResponse{}, nil
 	}
@@ -39,7 +46,7 @@ func (m *legacyContextManager) Compact(_ context.Context, req *CompactRequest) e
 	switch req.Reason {
 	case ContextCompressReasonProactive, ContextCompressReasonRetry:
 		// Sync emergency compression — budget exceeded.
-		if result, ok := m.forceCompression(req.SessionKey); ok {
+		if result, ok := m.forceCompressionForAgent(req.Agent, req.SessionKey); ok {
 			m.al.emitEvent(
 				EventKindContextCompress,
 				m.al.newTurnEventScope("", req.SessionKey, nil).meta(0, "forceCompression", "turn.context.compress"),
@@ -51,7 +58,7 @@ func (m *legacyContextManager) Compact(_ context.Context, req *CompactRequest) e
 			)
 		}
 	case ContextCompressReasonSummarize:
-		m.maybeSummarize(req.SessionKey)
+		m.maybeSummarizeForAgent(req.Agent, req.SessionKey)
 	}
 	return nil
 }
@@ -74,7 +81,11 @@ func (m *legacyContextManager) Clear(_ context.Context, sessionKey string) error
 // maybeSummarize triggers summarization if the session history exceeds thresholds.
 // It runs asynchronously in a goroutine.
 func (m *legacyContextManager) maybeSummarize(sessionKey string) {
-	agent := m.al.registry.GetDefaultAgent()
+	m.maybeSummarizeForAgent(nil, sessionKey)
+}
+
+func (m *legacyContextManager) maybeSummarizeForAgent(reqAgent *AgentInstance, sessionKey string) {
+	agent := m.requestAgent(reqAgent)
 	if agent == nil {
 		return
 	}
@@ -112,7 +123,11 @@ type compressionResult struct {
 // It drops the oldest ~50% of Turns (a Turn is a complete user→LLM→response
 // cycle, as defined in #1316), so tool-call sequences are never split.
 func (m *legacyContextManager) forceCompression(sessionKey string) (compressionResult, bool) {
-	agent := m.al.registry.GetDefaultAgent()
+	return m.forceCompressionForAgent(nil, sessionKey)
+}
+
+func (m *legacyContextManager) forceCompressionForAgent(reqAgent *AgentInstance, sessionKey string) (compressionResult, bool) {
+	agent := m.requestAgent(reqAgent)
 	if agent == nil {
 		return compressionResult{}, false
 	}

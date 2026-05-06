@@ -90,7 +90,7 @@ func TestNewAgentRegistry_ExplicitAgents(t *testing.T) {
 	}
 }
 
-func TestAgentRegistry_ExplicitMainInListIsIgnored(t *testing.T) {
+func TestAgentRegistry_ExplicitMainInListConfiguresMain(t *testing.T) {
 	model := &config.AgentModelConfig{Primary: "claude-opus"}
 	cfg := testCfg([]config.AgentConfig{
 		{ID: "main", Default: true, Name: "Configured Main", Model: model},
@@ -107,11 +107,11 @@ func TestAgentRegistry_ExplicitMainInListIsIgnored(t *testing.T) {
 	if !ok || main == nil {
 		t.Fatal("expected to find main agent")
 	}
-	if main.Name != "Main" {
-		t.Fatalf("main.Name = %q, want %q", main.Name, "Main")
+	if main.Name != "Configured Main" {
+		t.Fatalf("main.Name = %q, want %q", main.Name, "Configured Main")
 	}
-	if main.Model != "gpt-4" {
-		t.Fatalf("main.Model = %q, want %q", main.Model, "gpt-4")
+	if main.Model != "claude-opus" {
+		t.Fatalf("main.Model = %q, want %q", main.Model, "claude-opus")
 	}
 }
 

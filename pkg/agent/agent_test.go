@@ -701,6 +701,61 @@ func TestProcessMessage_AgentNoHistoryPreventsHistoryPersistence(t *testing.T) {
 	}
 }
 
+func TestRunAgentLoop_UsesSelectedAgentSessionHistory(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				ModelName:         "test-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+			List: []config.AgentConfig{
+				{ID: "main", Default: true},
+				{ID: "alt"},
+			},
+		},
+	}
+
+	provider := &recordingProvider{}
+	al := NewAgentLoop(cfg, bus.NewMessageBus(), provider)
+	altAgent, ok := al.GetRegistry().GetAgent("alt")
+	if !ok {
+		t.Fatal("expected alt agent")
+	}
+
+	sessionKey := "agent:alt:pico:direct:pico:session-1"
+	altHistory := []providers.Message{
+		{Role: "user", Content: "Remember: selected agent history must be used."},
+		{Role: "assistant", Content: "I will use the selected agent history."},
+	}
+	altAgent.Sessions.SetHistory(sessionKey, altHistory)
+
+	_, err := al.runAgentLoop(context.Background(), altAgent, processOptions{
+		SessionKey:      sessionKey,
+		UserMessage:     "what should be remembered?",
+		DefaultResponse: defaultResponse,
+		EnableSummary:   false,
+	})
+	if err != nil {
+		t.Fatalf("runAgentLoop() error = %v", err)
+	}
+
+	for _, want := range altHistory {
+		found := false
+		for _, got := range provider.lastMessages {
+			if got.Role == want.Role && got.Content == want.Content {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("provider messages did not include selected agent history message %#v; got %#v", want, provider.lastMessages)
+		}
+	}
+}
+
 func TestProcessMessage_BtwCommandRetriesWithoutMediaOnVisionUnsupported(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := &config.Config{

@@ -68,6 +68,7 @@ func (p *Pipeline) Finalize(
 				SessionKey: ts.sessionKey,
 				Reason:     ContextCompressReasonSummarize,
 				Budget:     ts.agent.ContextWindow,
+				Agent:      ts.agent,
 			},
 		)
 	}

@@ -28,11 +28,17 @@ func NewAgentRegistry(
 		resolver: routing.NewRouteResolver(cfg),
 	}
 
-	agentConfigs := cfg.Agents.List
 	mainConfig := &config.AgentConfig{
 		ID:      routing.DefaultAgentID,
 		Default: true,
 		Name:    "Main",
+	}
+	agentConfigs := cfg.Agents.List
+	for i := range agentConfigs {
+		if routing.NormalizeAgentID(agentConfigs[i].ID) == routing.DefaultAgentID {
+			mainConfig = &agentConfigs[i]
+			break
+		}
 	}
 	logger.InfoCF("agent", "Created implicit main agent", nil)
 	mainInstance := NewAgentInstance(mainConfig, &cfg.Agents.Defaults, cfg, provider)

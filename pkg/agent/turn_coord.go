@@ -358,6 +358,7 @@ func (al *AgentLoop) askSideQuestion(
 			SessionKey: opts.SessionKey,
 			Budget:     agent.ContextWindow,
 			MaxTokens:  agent.MaxTokens,
+			Agent:      agent,
 		}); err == nil && resp != nil {
 			history = resp.History
 			summary = resp.Summary
