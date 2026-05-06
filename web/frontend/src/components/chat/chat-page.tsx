@@ -377,7 +377,7 @@ export function ChatPage() {
               to: "/",
               search: (prev) => ({ ...prev, history: session.id }),
             })
-            void switchSession(session.id, session.session_id, session.agent_id)
+            void switchSession(session.id)
           }}
           onRenameSession={handleRenameSession}
           onDeleteSession={(session) => {

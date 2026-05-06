@@ -7,9 +7,12 @@ import {
   mergeHistoryMessages,
 } from "@/features/chat/history"
 import {
+  CHAT_SESSION_USER_MESSAGE_EVENT,
+  type ChatSessionUserMessageDetail,
   type PicoMessage,
   handlePicoMessage,
   notifySessionActivity,
+  notifySessionUserMessage,
 } from "@/features/chat/protocol"
 import {
   clearStoredSessionId,
@@ -92,7 +95,9 @@ function setActiveSessionId(sessionId: string) {
   updateChatStore({ activeSessionId: sessionId })
 }
 
-function isMissingStoredSessionError(error: unknown): error is SessionHistoryError {
+function isMissingStoredSessionError(
+  error: unknown,
+): error is SessionHistoryError {
   return (
     typeof error === "object" &&
     error !== null &&
@@ -103,6 +108,22 @@ function isMissingStoredSessionError(error: unknown): error is SessionHistoryErr
 
 function clearRestoreFailureForStoredSession() {
   clearStoredSessionId()
+}
+
+function handleCrossTabUserMessage(event: Event) {
+  const detail = (event as CustomEvent<ChatSessionUserMessageDetail>).detail
+  if (!detail?.sessionId || detail.sessionId !== activeSessionIdRef) {
+    return
+  }
+
+  updateChatStore((prev) => {
+    if (prev.messages.some((message) => message.id === detail.message.id)) {
+      return prev
+    }
+    return {
+      messages: [...prev.messages, detail.message],
+    }
+  })
 }
 
 function disconnectChatInternal({
@@ -383,29 +404,21 @@ export function sendChatMessage({
   const socket = wsRef
   const id = `msg-${++msgIdCounter}-${Date.now()}`
 
+  const userMessage = {
+    id,
+    role: "user" as const,
+    content: normalizedContent,
+    attachments:
+      normalizedAttachments.length > 0 ? normalizedAttachments : undefined,
+    timestamp: Date.now(),
+  }
+
   updateChatStore((prev) => ({
-    messages: [
-      ...prev.messages,
-      {
-        id,
-        role: "user",
-        content: normalizedContent,
-        attachments:
-          normalizedAttachments.length > 0 ? normalizedAttachments : undefined,
-        timestamp: Date.now(),
-      },
-    ],
+    messages: [...prev.messages, userMessage],
     isTyping: true,
   }))
 
   try {
-    notifySessionActivity({
-      sessionId: activeSessionIdRef,
-      preview:
-        normalizedContent ||
-        (normalizedAttachments.length > 0 ? "[image]" : ""),
-      timestamp: new Date().toISOString(),
-    })
     persistActiveSessionId(activeSessionIdRef)
     socket.send(
       JSON.stringify({
@@ -418,6 +431,17 @@ export function sendChatMessage({
         },
       }),
     )
+    notifySessionActivity({
+      sessionId: activeSessionIdRef,
+      preview:
+        normalizedContent ||
+        (normalizedAttachments.length > 0 ? "[image]" : ""),
+      timestamp: new Date().toISOString(),
+    })
+    notifySessionUserMessage({
+      sessionId: activeSessionIdRef,
+      message: userMessage,
+    })
     return true
   } catch (error) {
     console.error("Failed to send pico message:", error)
@@ -429,11 +453,7 @@ export function sendChatMessage({
   }
 }
 
-export async function switchChatSession(
-  sessionId: string,
-  _sessionIdFromStorage?: string,
-  _agentIdFromStorage?: string,
-) {
+export async function switchChatSession(sessionId: string) {
   if (sessionId === activeSessionIdRef) {
     return
   }
@@ -512,6 +532,10 @@ export function initializeChatStore() {
   }
 
   unsubscribeGateway = store.sub(gatewayAtom, syncConnectionWithGateway)
+  window.addEventListener(
+    CHAT_SESSION_USER_MESSAGE_EVENT,
+    handleCrossTabUserMessage as EventListener,
+  )
 
   if (!readStoredSessionId()) {
     updateChatStore({ hasHydratedActiveSession: true })
@@ -528,6 +552,10 @@ export function initializeChatStore() {
 }
 
 export function teardownChatStore() {
+  window.removeEventListener(
+    CHAT_SESSION_USER_MESSAGE_EVENT,
+    handleCrossTabUserMessage as EventListener,
+  )
   unsubscribeGateway?.()
   unsubscribeGateway = null
   initialized = false

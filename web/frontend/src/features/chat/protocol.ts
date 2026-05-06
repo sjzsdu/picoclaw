@@ -10,6 +10,22 @@ import {
 } from "@/store/chat"
 
 export const CHAT_SESSION_ACTIVITY_EVENT = "picoclaw:chat-session-activity"
+export const CHAT_SESSION_USER_MESSAGE_EVENT =
+  "picoclaw:chat-session-user-message"
+const CHAT_CROSS_TAB_CHANNEL = "picoclaw:chat-cross-tab"
+const CHAT_TAB_ID = `${Date.now()}-${Math.random().toString(36).slice(2)}`
+
+type CrossTabMessage =
+  | {
+      source: string
+      type: typeof CHAT_SESSION_ACTIVITY_EVENT
+      detail: ChatSessionActivityDetail
+    }
+  | {
+      source: string
+      type: typeof CHAT_SESSION_USER_MESSAGE_EVENT
+      detail: ChatSessionUserMessageDetail
+    }
 
 export interface ChatSessionActivityDetail {
   sessionId: string
@@ -17,15 +33,49 @@ export interface ChatSessionActivityDetail {
   timestamp?: string
 }
 
+export interface ChatSessionUserMessageDetail {
+  sessionId: string
+  message: ChatMessage
+}
+
+const crossTabChannel =
+  typeof globalThis.BroadcastChannel === "function"
+    ? new BroadcastChannel(CHAT_CROSS_TAB_CHANNEL)
+    : null
+
+function dispatchChatEvent<T>(type: string, detail: T) {
+  globalThis.window?.dispatchEvent(new CustomEvent(type, { detail }))
+}
+
+function broadcastChatEvent(message: Omit<CrossTabMessage, "source">) {
+  crossTabChannel?.postMessage({ ...message, source: CHAT_TAB_ID })
+}
+
+crossTabChannel?.addEventListener(
+  "message",
+  (event: MessageEvent<CrossTabMessage>) => {
+    const data = event.data
+    if (!data || data.source === CHAT_TAB_ID) {
+      return
+    }
+    dispatchChatEvent(data.type, data.detail)
+  },
+)
+
 export function notifySessionActivity(detail: ChatSessionActivityDetail) {
   if (!detail.sessionId) {
     return
   }
-  globalThis.window?.dispatchEvent(
-    new CustomEvent(CHAT_SESSION_ACTIVITY_EVENT, {
-      detail,
-    }),
-  )
+  dispatchChatEvent(CHAT_SESSION_ACTIVITY_EVENT, detail)
+  broadcastChatEvent({ type: CHAT_SESSION_ACTIVITY_EVENT, detail })
+}
+
+export function notifySessionUserMessage(detail: ChatSessionUserMessageDetail) {
+  if (!detail.sessionId || detail.message.role !== "user") {
+    return
+  }
+  dispatchChatEvent(CHAT_SESSION_USER_MESSAGE_EVENT, detail)
+  broadcastChatEvent({ type: CHAT_SESSION_USER_MESSAGE_EVENT, detail })
 }
 
 export interface PicoMessage {
@@ -328,7 +378,9 @@ export function handlePicoMessage(
 
       updateChatStore((prev) => ({
         messages: (() => {
-          const exactMessages = prev.messages.filter((msg) => msg.id !== messageId)
+          const exactMessages = prev.messages.filter(
+            (msg) => msg.id !== messageId,
+          )
           if (exactMessages.length !== prev.messages.length) {
             return exactMessages
           }
