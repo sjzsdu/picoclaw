@@ -5,6 +5,7 @@ import { useState } from "react"
 import { useTranslation } from "react-i18next"
 
 import type { SessionSummary } from "@/api/sessions"
+import { Button } from "@/components/ui/button"
 import {
   Dialog,
   DialogContent,
@@ -19,7 +20,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 
 dayjs.extend(relativeTime)
@@ -43,7 +43,7 @@ export function SessionHistoryDropdown({
   const [open, setOpen] = useState(false)
 
   const activeSession = sessions.find(
-    (s) => (s.session_id || s.id) === activeSessionId
+    (s) => (s.session_id || s.id) === activeSessionId,
   )
 
   return (
@@ -87,25 +87,14 @@ export function SessionHistoryDropdown({
                   </span>
                 </div>
                 <div className="flex items-center gap-1">
-                  <RenameDialog
-                    session={session}
-                    onRename={onRenameSession}
-                  />
+                  <RenameDialog session={session} onRename={onRenameSession} />
                   <Button
                     variant="ghost"
                     size="sm"
-                    className="h-6 w-6 p-0 text-destructive hover:text-destructive"
+                    className="text-destructive hover:text-destructive h-6 w-6 p-0"
                     onClick={(e) => {
                       e.stopPropagation()
-                      if (
-                        window.confirm(
-                          t("chat.confirmDelete", {
-                            defaultValue: "Delete this chat?",
-                          })
-                        )
-                      ) {
-                        onDeleteSession(session)
-                      }
+                      onDeleteSession(session)
                     }}
                   >
                     <IconTrash className="size-3" />
@@ -177,7 +166,9 @@ function RenameDialog({
             {t("common.cancel") || "Cancel"}
           </Button>
           <Button onClick={handleRename} disabled={loading || !title.trim()}>
-            {loading ? t("common.saving") || "Saving..." : t("common.save") || "Save"}
+            {loading
+              ? t("common.saving") || "Saving..."
+              : t("common.save") || "Save"}
           </Button>
         </div>
       </DialogContent>
