@@ -30,6 +30,7 @@ import {
 import { type GatewayState, gatewayAtom } from "@/store/gateway"
 
 const store = getDefaultStore()
+const HYDRATE_RETRY_DELAYS_MS = [300, 700, 1500, 2500]
 
 let wsRef: WebSocket | null = null
 let isConnecting = false
@@ -108,6 +109,31 @@ function isMissingStoredSessionError(
 
 function clearRestoreFailureForStoredSession() {
   clearStoredSessionId()
+}
+
+async function loadSessionMessagesWithRetry(sessionId: string) {
+  let lastError: unknown
+  for (
+    let attempt = 0;
+    attempt <= HYDRATE_RETRY_DELAYS_MS.length;
+    attempt += 1
+  ) {
+    try {
+      return await loadSessionMessages(sessionId)
+    } catch (error) {
+      lastError = error
+      if (
+        !isMissingStoredSessionError(error) ||
+        attempt >= HYDRATE_RETRY_DELAYS_MS.length
+      ) {
+        throw error
+      }
+      await new Promise((resolve) => {
+        window.setTimeout(resolve, HYDRATE_RETRY_DELAYS_MS[attempt])
+      })
+    }
+  }
+  throw lastError
 }
 
 function handleCrossTabUserMessage(event: Event) {
@@ -315,7 +341,7 @@ export async function hydrateActiveSession() {
     return
   }
 
-  hydratePromise = loadSessionMessages(storedSessionId)
+  hydratePromise = loadSessionMessagesWithRetry(storedSessionId)
     .then((historyMessages) => {
       const currentState = getChatState()
       if (currentState.activeSessionId !== storedSessionId) {
@@ -424,6 +450,7 @@ export function sendChatMessage({
       JSON.stringify({
         type: "message.send",
         id,
+        session_id: activeSessionIdRef,
         payload: {
           content: normalizedContent,
           ...(agentId ? { agent_id: agentId } : {}),

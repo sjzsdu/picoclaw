@@ -14,6 +14,9 @@ import {
 } from "@/features/chat/protocol"
 
 const LIMIT = 20
+const OPTIMISTIC_SESSION_TTL_MS = 30_000
+
+type OptimisticSession = SessionSummary & { optimisticUntil: number }
 
 interface UseSessionHistoryOptions {
   activeSessionId: string
@@ -31,6 +34,33 @@ export function useSessionHistory({
   const [hasMore, setHasMore] = useState(true)
   const [isLoadingMore, setIsLoadingMore] = useState(false)
   const [loadError, setLoadError] = useState(false)
+  const optimisticSessionsRef = useRef<Map<string, OptimisticSession>>(
+    new Map(),
+  )
+
+  const mergeOptimisticSessions = useCallback((data: SessionSummary[]) => {
+    const now = Date.now()
+    const dataIds = new Set(data.map((session) => session.id))
+    const pending: SessionSummary[] = []
+    for (const [id, session] of optimisticSessionsRef.current) {
+      if (session.optimisticUntil <= now || dataIds.has(id)) {
+        optimisticSessionsRef.current.delete(id)
+        continue
+      }
+      const summary: SessionSummary = {
+        id: session.id,
+        title: session.title,
+        preview: session.preview,
+        message_count: session.message_count,
+        created: session.created,
+        updated: session.updated,
+        session_id: session.session_id,
+        agent_id: session.agent_id,
+      }
+      pending.push(summary)
+    }
+    return [...pending, ...data]
+  }, [])
 
   const applyOptimisticSessionActivity = useCallback(
     (detail: ChatSessionActivityDetail) => {
@@ -62,6 +92,10 @@ export function useSessionHistory({
               created: updated,
               updated,
             }
+        optimisticSessionsRef.current.set(sessionId, {
+          ...next,
+          optimisticUntil: Date.now() + OPTIMISTIC_SESSION_TTL_MS,
+        })
         return [next, ...rest]
       })
     },
@@ -86,7 +120,7 @@ export function useSessionHistory({
         }
 
         if (reset) {
-          setSessions(data)
+          setSessions(mergeOptimisticSessions(data))
         } else {
           setSessions((prev) => {
             const existingIds = new Set(prev.map((s) => s.id))
@@ -106,7 +140,7 @@ export function useSessionHistory({
         setIsLoadingMore(false)
       }
     },
-    [offset],
+    [mergeOptimisticSessions, offset],
   )
 
   useEffect(() => {
