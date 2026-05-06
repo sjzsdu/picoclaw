@@ -122,10 +122,10 @@ export function AssistantMessage({
           {(!isThought || isThoughtExpanded) && hasText && (
             <div
               className={cn(
-                "prose dark:prose-invert prose-pre:my-2 prose-pre:overflow-x-auto prose-pre:rounded-lg prose-pre:border prose-pre:bg-zinc-100 prose-pre:p-0 prose-pre:text-zinc-900 max-w-none [overflow-wrap:anywhere] break-words dark:prose-pre:bg-zinc-950 dark:prose-pre:text-zinc-100",
+                "prose prose-sm dark:prose-invert prose-headings:my-2 prose-p:leading-normal prose-ul:my-1.5 prose-ol:my-1.5 prose-li:my-0.5 prose-blockquote:my-2 prose-hr:my-3 prose-table:my-2 prose-pre:my-2 prose-pre:overflow-x-auto prose-pre:rounded-lg prose-pre:border prose-pre:bg-zinc-100 prose-pre:p-0 prose-pre:text-zinc-900 max-w-none [overflow-wrap:anywhere] break-words dark:prose-pre:bg-zinc-950 dark:prose-pre:text-zinc-100",
                 isThought
-                  ? "prose-p:my-1.5 prose-p:whitespace-pre-wrap p-3 text-[13px] leading-relaxed text-amber-950/90 dark:text-amber-50/90"
-                  : "prose-p:my-2 prose-p:whitespace-pre-wrap p-4 text-[15px] leading-relaxed",
+                  ? "prose-p:my-1 prose-p:whitespace-pre-wrap p-2.5 text-[12px] leading-normal text-amber-950/90 dark:text-amber-50/90"
+                  : "prose-p:my-1.5 prose-p:whitespace-pre-wrap p-3 text-[14px] leading-normal",
               )}
             >
               <ReactMarkdown

@@ -33,8 +33,8 @@ export function UserMessage({ content, attachments = [] }: UserMessageProps) {
           className={cn(
             "max-w-[70%] wrap-break-word whitespace-pre-wrap",
             isCommand
-              ? "rounded-xl border border-zinc-200 bg-transparent px-4 py-3 font-mono text-[14px] text-zinc-800 dark:border-zinc-800/60 dark:bg-[#121212] dark:text-zinc-200 dark:shadow-sm"
-              : "rounded-2xl rounded-tr-sm bg-violet-500 px-5 py-3 text-[15px] leading-relaxed text-white shadow-sm",
+              ? "rounded-xl border border-zinc-200 bg-transparent px-3 py-2.5 font-mono text-[13px] leading-normal text-zinc-800 dark:border-zinc-800/60 dark:bg-[#121212] dark:text-zinc-200 dark:shadow-sm"
+              : "rounded-2xl rounded-tr-sm bg-violet-500 px-4 py-2.5 text-[14px] leading-normal text-white shadow-sm",
           )}
         >
           {isCommand ? (
