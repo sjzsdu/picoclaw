@@ -1,5 +1,4 @@
 import { IconArrowDown, IconPlus } from "@tabler/icons-react"
-import { useAtom } from "jotai"
 import { useNavigate } from "@tanstack/react-router"
 import { type ChangeEvent, useEffect, useMemo, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
@@ -18,14 +17,12 @@ import { TypingIndicator } from "@/components/chat/typing-indicator"
 import { UserMessage } from "@/components/chat/user-message"
 import { PageHeader } from "@/components/page-header"
 import { Button } from "@/components/ui/button"
-import { Switch } from "@/components/ui/switch"
 import { useChatAgents } from "@/hooks/use-chat-agents"
 import { useChatModels } from "@/hooks/use-chat-models"
 import { useGateway } from "@/hooks/use-gateway"
 import { usePicoChat } from "@/hooks/use-pico-chat"
 import { useSessionHistory } from "@/hooks/use-session-history"
 import type { ChatAttachment } from "@/store/chat"
-import { showThoughtsAtom } from "@/store/chat"
 
 const MAX_IMAGE_SIZE_BYTES = 7 * 1024 * 1024
 const MAX_IMAGE_SIZE_LABEL = "7 MB"
@@ -100,7 +97,6 @@ export function ChatPage() {
   const [hasScrolled, setHasScrolled] = useState(false)
   const [input, setInput] = useState("")
   const [attachments, setAttachments] = useState<ChatAttachment[]>([])
-  const [showThoughts, setShowThoughts] = useAtom(showThoughtsAtom)
   const [activeViewportMessageId, setActiveViewportMessageId] = useState("")
   const [minimapItems, setMinimapItems] = useState<MessageMinimapItem[]>([])
 
@@ -118,8 +114,13 @@ export function ChatPage() {
   const { state: gwState } = useGateway()
   const isGatewayRunning = gwState === "running"
   const isChatConnected = connectionState === "connected"
-  const { agents, selectedAgentId, activeAgentId, hasSelectableAgents, handleSelectAgent } =
-    useChatAgents(activeSessionId)
+  const {
+    agents,
+    selectedAgentId,
+    activeAgentId,
+    hasSelectableAgents,
+    handleSelectAgent,
+  } = useChatAgents(activeSessionId)
   const agentNameById = useMemo(
     () =>
       new Map(
@@ -143,17 +144,15 @@ export function ChatPage() {
   const inputDisabledReason = resolveChatInputDisabledReason({
     hasDefaultModel: Boolean(defaultModelName),
     connectionState,
-    gatewayState: gwState,  })
+    gatewayState: gwState,
+  })
   const canSend = isChatConnected && Boolean(defaultModelName) && !isTyping
 
-  const {
-    sessions,
-    handleDeleteSession,
-    handleRenameSession,
-  } = useSessionHistory({
-    activeSessionId,
-    onDeletedActiveSession: newChat,
-  })
+  const { sessions, handleDeleteSession, handleRenameSession } =
+    useSessionHistory({
+      activeSessionId,
+      onDeletedActiveSession: newChat,
+    })
 
   const syncScrollState = (element: HTMLDivElement) => {
     const { clientHeight, scrollHeight, scrollTop } = element
@@ -354,18 +353,6 @@ export function ChatPage() {
           </div>
         }
       >
-        <div className="hidden items-center gap-2 rounded-lg border border-border/60 px-3 py-1.5 sm:flex">
-          <span className="text-muted-foreground text-sm">
-            {t("chat.showThoughts")}
-          </span>
-          <Switch
-            checked={showThoughts}
-            onCheckedChange={setShowThoughts}
-            aria-label={t("chat.showThoughts")}
-            size="sm"
-          />
-        </div>
-
         <Button
           variant="secondary"
           size="sm"
@@ -403,7 +390,7 @@ export function ChatPage() {
         <div
           ref={scrollRef}
           onScroll={handleScroll}
-          className="min-h-0 h-full overflow-y-auto px-4 py-6 [scrollbar-gutter:stable] md:px-8 lg:px-24 xl:px-48"
+          className="h-full min-h-0 overflow-y-auto px-4 py-6 [scrollbar-gutter:stable] md:px-8 lg:px-24 xl:px-48"
         >
           <div className="mx-auto flex w-full max-w-250 flex-col gap-8 pb-8">
             {messages.length === 0 && !isTyping && (
@@ -415,40 +402,34 @@ export function ChatPage() {
               />
             )}
 
-            {messages.map((msg) => {
-              if (msg.kind === "thought" && !showThoughts) {
-                return null
-              }
-
-              return (
-                <div
-                  key={msg.id}
-                  ref={(node) => {
-                    messageRefs.current[msg.id] = node
-                  }}
-                  className="flex w-full flex-col"
-                >
-                  {msg.role === "assistant" ? (
-                    <AssistantMessage
-                      content={msg.content}
-                      attachments={msg.attachments}
-                      isThought={msg.kind === "thought"}
-                      timestamp={msg.timestamp}
-                      agentId={msg.agentId}
-                      agentName={
-                        msg.agentId ? agentNameById.get(msg.agentId) : undefined
-                      }
-                      modelName={msg.modelName}
-                    />
-                  ) : (
-                    <UserMessage
-                      content={msg.content}
-                      attachments={msg.attachments}
-                    />
-                  )}
-                </div>
-              )
-            })}
+            {messages.map((msg) => (
+              <div
+                key={msg.id}
+                ref={(node) => {
+                  messageRefs.current[msg.id] = node
+                }}
+                className="flex w-full flex-col"
+              >
+                {msg.role === "assistant" ? (
+                  <AssistantMessage
+                    content={msg.content}
+                    attachments={msg.attachments}
+                    isThought={msg.kind === "thought"}
+                    timestamp={msg.timestamp}
+                    agentId={msg.agentId}
+                    agentName={
+                      msg.agentId ? agentNameById.get(msg.agentId) : undefined
+                    }
+                    modelName={msg.modelName}
+                  />
+                ) : (
+                  <UserMessage
+                    content={msg.content}
+                    attachments={msg.attachments}
+                  />
+                )}
+              </div>
+            ))}
 
             {isTyping && !hasStreamingAssistant && <TypingIndicator />}
           </div>

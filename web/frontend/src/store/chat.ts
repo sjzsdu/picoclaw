@@ -1,9 +1,6 @@
 import { atom, getDefaultStore } from "jotai"
-import { atomWithStorage } from "jotai/utils"
 
-import {
-  getInitialActiveSessionId,
-} from "@/features/chat/state"
+import { getInitialActiveSessionId } from "@/features/chat/state"
 
 export interface ChatAttachment {
   type: "image" | "audio" | "video" | "file"
@@ -54,8 +51,6 @@ export interface ChatStoreState {
 
 type ChatStorePatch = Partial<ChatStoreState>
 
-const SHOW_THOUGHTS_STORAGE_KEY = "picoclaw:chat-show-thoughts"
-
 const DEFAULT_CHAT_STATE: ChatStoreState = {
   messages: [],
   connectionState: "disconnected",
@@ -65,10 +60,6 @@ const DEFAULT_CHAT_STATE: ChatStoreState = {
 }
 
 export const chatAtom = atom<ChatStoreState>(DEFAULT_CHAT_STATE)
-export const showThoughtsAtom = atomWithStorage<boolean>(
-  SHOW_THOUGHTS_STORAGE_KEY,
-  true,
-)
 
 const store = getDefaultStore()
 
