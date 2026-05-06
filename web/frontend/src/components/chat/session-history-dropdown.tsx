@@ -49,9 +49,12 @@ export function SessionHistoryDropdown({
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger asChild>
-        <Button variant="secondary" size="sm" className="h-9 gap-2">
-          <IconHistory className="size-4" />
-          <span className="hidden sm:inline">
+        <Button variant="secondary" size="sm" className="h-9 min-w-0 gap-2">
+          <IconHistory className="size-4 shrink-0" />
+          <span
+            className="hidden max-w-40 truncate sm:inline md:max-w-56 lg:max-w-72"
+            title={activeSession?.title || t("chat.history")}
+          >
             {activeSession?.title || t("chat.history")}
           </span>
         </Button>
