@@ -454,7 +454,7 @@ func buildSessionListItem(sessionID string, sess sessionFile, toolFeedbackMaxArg
 		title = customTitle
 	}
 
-	return sessionListItem {
+	return sessionListItem{
 		ID:           sessionID,
 		Title:        title,
 		Preview:      preview,
@@ -1278,35 +1278,32 @@ func (h *Handler) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "failed to resolve sessions directory", http.StatusInternalServerError)
 		return
 	}
-	locator, err := h.locateSessionAcrossDirs(dirs, sessionID)
-	if err != nil {
-		http.Error(w, "session not found", http.StatusNotFound)
-		return
-	}
 
 	removed := false
-	if ref, err := h.findPicoJSONLSession(locator.Dir, sessionID); err == nil {
-		base := filepath.Join(locator.Dir, sanitizeSessionKey(ref.Key))
-		for _, path := range []string{base + ".jsonl", base + ".meta.json"} {
-			if err := os.Remove(path); err != nil {
-				if os.IsNotExist(err) {
-					continue
+	for _, dir := range dirs {
+		if ref, err := h.findPicoJSONLSession(dir, sessionID); err == nil {
+			base := filepath.Join(dir, sanitizeSessionKey(ref.Key))
+			for _, path := range []string{base + ".jsonl", base + ".meta.json"} {
+				if err := os.Remove(path); err != nil {
+					if os.IsNotExist(err) {
+						continue
+					}
+					http.Error(w, "failed to delete session", http.StatusInternalServerError)
+					return
 				}
-				http.Error(w, "failed to delete session", http.StatusInternalServerError)
-				return
+				removed = true
 			}
-			removed = true
 		}
-	}
 
-	if legacyRef, err := h.findLegacyPicoSession(locator.Dir, sessionID); err == nil {
-		if err := os.Remove(legacyRef.Path); err != nil {
-			if !os.IsNotExist(err) {
-				http.Error(w, "failed to delete session", http.StatusInternalServerError)
-				return
+		if legacyRef, err := h.findLegacyPicoSession(dir, sessionID); err == nil {
+			if err := os.Remove(legacyRef.Path); err != nil {
+				if !os.IsNotExist(err) {
+					http.Error(w, "failed to delete session", http.StatusInternalServerError)
+					return
+				}
+			} else {
+				removed = true
 			}
-		} else {
-			removed = true
 		}
 	}
 

@@ -1805,6 +1805,70 @@ func TestHandleDeleteSession_JSONLStorage(t *testing.T) {
 	}
 }
 
+func TestHandleDeleteSession_RemovesDuplicatesAcrossAgentWorkspaces(t *testing.T) {
+	configPath, cleanup := setupOAuthTestEnv(t)
+	defer cleanup()
+
+	cfg, err := config.LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+	agentWorkspace := filepath.Join(t.TempDir(), "support-workspace")
+	cfg.Agents.List = append(cfg.Agents.List, config.AgentConfig{
+		ID:        "support",
+		Name:      "Support",
+		Workspace: agentWorkspace,
+	})
+	if err := config.SaveConfig(configPath, cfg); err != nil {
+		t.Fatalf("SaveConfig() error = %v", err)
+	}
+
+	defaultDir := filepath.Join(cfg.Agents.Defaults.Workspace, "sessions")
+	agentDir := filepath.Join(agentWorkspace, "sessions")
+	for _, dir := range []string{defaultDir, agentDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("MkdirAll(%s) error = %v", dir, err)
+		}
+		store, err := memory.NewJSONLStore(dir)
+		if err != nil {
+			t.Fatalf("NewJSONLStore(%s) error = %v", dir, err)
+		}
+		if err := store.AddFullMessage(nil, legacyPicoSessionPrefix+"duplicate-delete", providers.Message{
+			Role:    "user",
+			Content: "delete duplicate",
+		}); err != nil {
+			t.Fatalf("AddFullMessage(%s) error = %v", dir, err)
+		}
+	}
+
+	h := NewHandler(configPath)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	deleteRec := httptest.NewRecorder()
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/api/sessions/duplicate-delete", nil)
+	mux.ServeHTTP(deleteRec, deleteReq)
+	if deleteRec.Code != http.StatusNoContent {
+		t.Fatalf("delete status = %d, want %d, body=%s", deleteRec.Code, http.StatusNoContent, deleteRec.Body.String())
+	}
+
+	listRec := httptest.NewRecorder()
+	listReq := httptest.NewRequest(http.MethodGet, "/api/sessions", nil)
+	mux.ServeHTTP(listRec, listReq)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("list status = %d, want %d, body=%s", listRec.Code, http.StatusOK, listRec.Body.String())
+	}
+	var items []sessionListItem
+	if err := json.Unmarshal(listRec.Body.Bytes(), &items); err != nil {
+		t.Fatalf("Unmarshal(list) error = %v", err)
+	}
+	for _, item := range items {
+		if item.ID == "duplicate-delete" {
+			t.Fatalf("deleted duplicate session still listed: %#v", item)
+		}
+	}
+}
+
 func TestHandleGetSession_LegacyJSONFallback(t *testing.T) {
 	configPath, cleanup := setupOAuthTestEnv(t)
 	defer cleanup()
