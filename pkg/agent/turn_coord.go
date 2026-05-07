@@ -13,6 +13,19 @@ import (
 	"github.com/sipeed/picoclaw/pkg/providers"
 )
 
+func fallbackForEmptyFinalContent(ts *turnState, al *AgentLoop, exec *turnExecution) string {
+	if ts.channel == "pico" &&
+		(exec.publishedPicoReasoning ||
+			exec.publishedPicoVisibleOutput ||
+			al.picoMessageToolSentToCurrentChat(ts)) {
+		return ""
+	}
+	if ts.channel == "pico" {
+		return defaultResponse
+	}
+	return ts.opts.DefaultResponse
+}
+
 func (al *AgentLoop) runTurn(ctx context.Context, ts *turnState, pipeline *Pipeline) (turnResult, error) {
 	turnCtx, turnCancel := context.WithCancel(ctx)
 	defer turnCancel()
@@ -188,7 +201,7 @@ func (al *AgentLoop) runTurn(ctx context.Context, ts *turnState, pipeline *Pipel
 			}
 			// Ensure empty response falls back to DefaultResponse
 			if finalContent == "" {
-				finalContent = ts.opts.DefaultResponse
+				finalContent = fallbackForEmptyFinalContent(ts, al, exec)
 			}
 			return pipeline.Finalize(ctx, turnCtx, ts, exec, turnStatus, finalContent)
 		case ControlToolLoop:
@@ -216,6 +229,8 @@ func (al *AgentLoop) runTurn(ctx context.Context, ts *turnState, pipeline *Pipel
 				// - allResponsesHandled=false: coordinator applies DefaultResponse before finalize
 				if exec.allResponsesHandled {
 					finalContent = ""
+				} else if finalContent == "" {
+					finalContent = fallbackForEmptyFinalContent(ts, al, exec)
 				}
 				return pipeline.Finalize(ctx, turnCtx, ts, exec, turnStatus, finalContent)
 			}
@@ -228,16 +243,10 @@ func (al *AgentLoop) runTurn(ctx context.Context, ts *turnState, pipeline *Pipel
 	}
 
 	if finalContent == "" {
-		if ts.channel == "pico" &&
-			(exec.publishedPicoReasoning ||
-				exec.publishedPicoVisibleOutput ||
-				al.picoMessageToolSentToCurrentChat(ts)) {
-			return pipeline.Finalize(ctx, turnCtx, ts, exec, turnStatus, "")
-		}
 		if ts.currentIteration() >= ts.agent.MaxIterations && ts.agent.MaxIterations > 0 {
 			finalContent = toolLimitResponse
 		} else {
-			finalContent = ts.opts.DefaultResponse
+			finalContent = fallbackForEmptyFinalContent(ts, al, exec)
 		}
 	}
 

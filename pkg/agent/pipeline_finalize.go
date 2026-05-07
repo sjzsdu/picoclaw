@@ -4,6 +4,7 @@ package agent
 
 import (
 	"context"
+	"strings"
 
 	"github.com/sipeed/picoclaw/pkg/bus"
 	"github.com/sipeed/picoclaw/pkg/providers"
@@ -45,9 +46,11 @@ func (p *Pipeline) Finalize(
 			Content:          finalContent,
 			ReasoningContent: responseReasoningContent(exec.response),
 		}
-		ts.agent.Sessions.AddFullMessage(ts.sessionKey, finalMsg)
-		ts.recordPersistedMessage(finalMsg)
-		ts.ingestMessage(turnCtx, al, finalMsg)
+		if strings.TrimSpace(finalMsg.Content) != "" || strings.TrimSpace(finalMsg.ReasoningContent) != "" {
+			ts.agent.Sessions.AddFullMessage(ts.sessionKey, finalMsg)
+			ts.recordPersistedMessage(finalMsg)
+			ts.ingestMessage(turnCtx, al, finalMsg)
+		}
 		if err := ts.agent.Sessions.Save(ts.sessionKey); err != nil {
 			al.emitEvent(
 				EventKindError,

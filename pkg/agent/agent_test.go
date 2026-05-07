@@ -3661,6 +3661,54 @@ func TestAgentLoop_EmptyModelResponseUsesAccurateFallback(t *testing.T) {
 	}
 }
 
+func TestAgentLoop_PicoEmptyModelResponseUsesVisibleFallback(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				ModelName:         "test-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 3,
+			},
+		},
+	}
+
+	msgBus := bus.NewMessageBus()
+	provider := &simpleMockProvider{response: ""}
+	al := NewAgentLoop(cfg, msgBus, provider)
+
+	response, err := al.processMessage(context.Background(), testInboundMessage(bus.InboundMessage{
+		Channel:  "pico",
+		SenderID: "user-1",
+		ChatID:   "session-1",
+		Content:  "hello",
+	}))
+	if err != nil {
+		t.Fatalf("processMessage() error = %v", err)
+	}
+	if response != defaultResponse {
+		t.Fatalf("response = %q, want %q", response, defaultResponse)
+	}
+
+	agent := al.GetRegistry().GetDefaultAgent()
+	if agent == nil {
+		t.Fatal("expected default agent")
+	}
+	sessionKeys := agent.Sessions.ListSessions()
+	if len(sessionKeys) != 1 {
+		t.Fatalf("session keys = %v, want exactly 1", sessionKeys)
+	}
+	history := agent.Sessions.GetHistory(sessionKeys[0])
+	if len(history) < 2 {
+		t.Fatalf("history len = %d, want at least 2", len(history))
+	}
+	last := history[len(history)-1]
+	if last.Role != "assistant" || last.Content != defaultResponse {
+		t.Fatalf("last history message = %#v, want assistant fallback", last)
+	}
+}
+
 func TestAgentLoop_ToolLimitUsesDedicatedFallback(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "agent-test-*")
 	if err != nil {
