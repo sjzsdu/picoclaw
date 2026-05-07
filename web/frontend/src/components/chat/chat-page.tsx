@@ -253,6 +253,7 @@ export function ChatPage() {
         content: input,
         attachments,
         agentId: activeAgentId || undefined,
+        modelName: defaultModelName || undefined,
       })
     ) {
       setInput("")
@@ -270,6 +271,7 @@ export function ChatPage() {
         content: prompt,
         attachments: [],
         agentId: activeAgentId || undefined,
+        modelName: defaultModelName || undefined,
       })
     ) {
       setInput("")
@@ -518,7 +520,13 @@ export function ChatPage() {
         onRemoveAttachment={handleRemoveAttachment}
         onSend={handleSend}
         onContextDetail={() => {
-          if (sendMessage({ content: "/context", attachments: [] })) {
+          if (
+            sendMessage({
+              content: "/context",
+              attachments: [],
+              modelName: defaultModelName || undefined,
+            })
+          ) {
             setInput("")
           }
         }}

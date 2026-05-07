@@ -406,12 +406,14 @@ interface SendChatMessageInput {
   content: string
   attachments?: ChatAttachment[]
   agentId?: string
+  modelName?: string
 }
 
 export function sendChatMessage({
   content,
   attachments = [],
   agentId,
+  modelName,
 }: SendChatMessageInput) {
   if (!wsRef || wsRef.readyState !== WebSocket.OPEN) {
     console.warn("WebSocket not connected")
@@ -454,6 +456,7 @@ export function sendChatMessage({
         payload: {
           content: normalizedContent,
           ...(agentId ? { agent_id: agentId } : {}),
+          ...(modelName ? { model_name: modelName } : {}),
           media: normalizedAttachments.map((attachment) => attachment.url),
         },
       }),

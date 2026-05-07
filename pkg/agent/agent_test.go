@@ -320,6 +320,68 @@ func TestProcessMessage_IncludesRuntimeModelInDynamicContext(t *testing.T) {
 	}
 }
 
+func TestProcessMessage_PicoModelNameOverridesSelectedAgentModel(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				ModelName:         "default-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+			List: []config.AgentConfig{
+				{ID: "main", Default: true, Model: &config.AgentModelConfig{Primary: "default-model"}},
+				{ID: "stock-analyst", Model: &config.AgentModelConfig{Primary: "deepseek-r1"}},
+			},
+		},
+		ModelList: []*config.ModelConfig{
+			{ModelName: "default-model", Model: "openai/default-model"},
+			{ModelName: "deepseek-r1", Model: "ollama/deepseek-r1"},
+			{ModelName: "gpt-5.4", Model: "openai/gpt-5.4"},
+		},
+	}
+
+	provider := &recordingProvider{}
+	al := NewAgentLoop(cfg, bus.NewMessageBus(), provider)
+	al.providerFactory = func(mc *config.ModelConfig) (providers.LLMProvider, string, error) {
+		return provider, strings.TrimPrefix(mc.Model, "openai/"), nil
+	}
+
+	resp, err := al.processMessage(context.Background(), testInboundMessage(bus.InboundMessage{
+		Channel:  "pico",
+		ChatID:   "pico:session-1",
+		SenderID: "pico-user",
+		Content:  "从技术角度分析一下601688",
+		Context: bus.InboundContext{
+			Channel:  "pico",
+			ChatID:   "pico:session-1",
+			ChatType: "direct",
+			SenderID: "pico-user",
+			Raw: map[string]string{
+				"agent_id":   "stock-analyst",
+				"model_name": "gpt-5.4",
+			},
+		},
+	}))
+	if err != nil {
+		t.Fatalf("processMessage() error = %v", err)
+	}
+	if resp != "Mock response" {
+		t.Fatalf("processMessage() response = %q, want Mock response", resp)
+	}
+	if provider.lastModel != "gpt-5.4" {
+		t.Fatalf("provider model = %q, want gpt-5.4", provider.lastModel)
+	}
+	stockAgent, ok := al.GetRegistry().GetAgent("stock-analyst")
+	if !ok {
+		t.Fatal("stock-analyst agent not found")
+	}
+	if stockAgent.Model != "gpt-5.4" {
+		t.Fatalf("stock agent model = %q, want gpt-5.4", stockAgent.Model)
+	}
+}
+
 func TestProcessMessage_UseCommandLoadsRequestedSkill(t *testing.T) {
 	tmpDir := t.TempDir()
 	skillDir := filepath.Join(tmpDir, "skills", "shell")

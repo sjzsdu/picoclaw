@@ -927,12 +927,16 @@ func (c *PicoChannel) handleMessageSend(pc *picoConn, msg PicoMessage) {
 	if requestedAgentID, _ := msg.Payload["agent_id"].(string); strings.TrimSpace(requestedAgentID) != "" {
 		metadata["agent_id"] = strings.TrimSpace(requestedAgentID)
 	}
+	if requestedModelName, _ := msg.Payload["model_name"].(string); strings.TrimSpace(requestedModelName) != "" {
+		metadata["model_name"] = strings.TrimSpace(requestedModelName)
+	}
 
 	logger.DebugCF("pico", "Received message", map[string]any{
 		"session_id": sessionID,
 		"preview":    truncate(content, 50),
 		"media":      len(media),
 		"agent_id":   metadata["agent_id"],
+		"model_name": metadata["model_name"],
 	})
 
 	sender := bus.SenderInfo{

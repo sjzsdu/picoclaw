@@ -10,6 +10,7 @@ import (
 	"github.com/sipeed/picoclaw/pkg/bus"
 	"github.com/sipeed/picoclaw/pkg/constants"
 	"github.com/sipeed/picoclaw/pkg/logger"
+	"github.com/sipeed/picoclaw/pkg/providers"
 	"github.com/sipeed/picoclaw/pkg/routing"
 	"github.com/sipeed/picoclaw/pkg/session"
 	"github.com/sipeed/picoclaw/pkg/utils"
@@ -217,6 +218,7 @@ func (al *AgentLoop) processMessage(ctx context.Context, msg bus.InboundMessage)
 	logger.InfoCF("agent", "Routed message",
 		map[string]any{
 			"agent_id":           agent.ID,
+			"model_name":         agent.Model,
 			"scope_key":          scopeKey,
 			"session_key":        sessionKey,
 			"matched_by":         route.MatchedBy,
@@ -224,6 +226,15 @@ func (al *AgentLoop) processMessage(ctx context.Context, msg bus.InboundMessage)
 			"route_channel":      route.Channel,
 			"route_main_session": allocation.MainSessionKey,
 		})
+
+	if err := al.applyInboundModelOverride(agent, msg.Context.Raw["model_name"]); err != nil {
+		logger.WarnCF("agent", "Ignoring invalid inbound model override",
+			map[string]any{
+				"agent_id":   agent.ID,
+				"model_name": strings.TrimSpace(msg.Context.Raw["model_name"]),
+				"error":      err.Error(),
+			})
+	}
 
 	opts := processOptions{
 		Dispatch: DispatchRequest{
@@ -260,6 +271,53 @@ func (al *AgentLoop) processMessage(ctx context.Context, msg bus.InboundMessage)
 	}
 
 	return al.runAgentLoop(ctx, agent, opts)
+}
+
+func (al *AgentLoop) applyInboundModelOverride(agent *AgentInstance, modelName string) error {
+	if agent == nil {
+		return nil
+	}
+	modelName = strings.TrimSpace(modelName)
+	if modelName == "" || modelName == agent.Model {
+		return nil
+	}
+
+	modelCfg, err := resolvedModelConfig(al.cfg, modelName, agent.Workspace)
+	if err != nil {
+		return err
+	}
+
+	provider, resolvedModel, err := al.providerFactory(modelCfg)
+	if err != nil {
+		return fmt.Errorf("failed to initialize model %q: %w", modelName, err)
+	}
+	if strings.TrimSpace(resolvedModel) == "" {
+		resolvedModel = modelName
+	}
+
+	candidates := resolveModelCandidates(al.cfg, al.cfg.Agents.Defaults.Provider, modelName, agent.Fallbacks)
+	if len(candidates) == 0 {
+		return fmt.Errorf("model %q did not resolve to any provider candidates", modelName)
+	}
+
+	oldProvider := agent.Provider
+	agent.Model = modelName
+	agent.Provider = provider
+	agent.Candidates = candidates
+	agent.ThinkingLevel = parseThinkingLevel(modelCfg.ThinkingLevel)
+
+	if oldProvider != nil && oldProvider != provider {
+		if stateful, ok := oldProvider.(providers.StatefulProvider); ok {
+			stateful.Close()
+		}
+	}
+	logger.InfoCF("agent", "Applied inbound model override",
+		map[string]any{
+			"agent_id":       agent.ID,
+			"model_name":     modelName,
+			"resolved_model": resolvedModel,
+		})
+	return nil
 }
 
 func (al *AgentLoop) resolveMessageRoute(msg bus.InboundMessage) (routing.ResolvedRoute, *AgentInstance, error) {
