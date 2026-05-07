@@ -139,7 +139,7 @@ func (al *AgentLoop) runTurn(ctx context.Context, ts *turnState, pipeline *Pipel
 			for i, pm := range pendingMessages {
 				messages = append(messages, resolvedPending[i])
 				totalContentLen += len(pm.Content)
-				if !ts.opts.NoHistory {
+				if !ts.opts.SkipSessionPersistence {
 					ts.agent.Sessions.AddFullMessage(ts.sessionKey, pm)
 					ts.recordPersistedMessage(pm)
 					ts.ingestMessage(turnCtx, al, pm)
@@ -261,7 +261,7 @@ func (al *AgentLoop) runTurn(ctx context.Context, ts *turnState, pipeline *Pipel
 
 func (al *AgentLoop) abortTurn(ts *turnState) (turnResult, error) {
 	ts.setPhase(TurnPhaseAborted)
-	if !ts.opts.NoHistory {
+	if !ts.opts.SkipSessionPersistence {
 		if err := ts.restoreSession(ts.agent); err != nil {
 			al.emitEvent(
 				EventKindError,

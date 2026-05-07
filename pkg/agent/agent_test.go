@@ -630,8 +630,9 @@ func TestProcessMessage_CLI_BypassesRoutingAndUsesDefaultAgent(t *testing.T) {
 	}
 }
 
-// Test 2: Agent with no_history should not persist session history
-func TestProcessMessage_AgentNoHistoryPreventsHistoryPersistence(t *testing.T) {
+// Test 2: Agent with no_history should not send previous turns to the model,
+// but should still persist the session transcript for UI/history purposes.
+func TestProcessMessage_AgentNoHistorySkipsContextLoadButPersistsTranscript(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
@@ -682,7 +683,8 @@ func TestProcessMessage_AgentNoHistoryPreventsHistoryPersistence(t *testing.T) {
 	}
 	defaultAgent.Sessions.SetHistory(sessionKey, initialHistory)
 
-	// Process a normal message; with NoHistory = true, history should not be loaded or extended
+	// Process a normal message; with NoHistory = true, history should not be loaded
+	// into the LLM request, but the new user/assistant turn should still be saved.
 	_, err = al.processMessage(context.Background(), testInboundMessage(bus.InboundMessage{
 		Channel:  "telegram",
 		ChatID:   "chat-1",
@@ -695,9 +697,25 @@ func TestProcessMessage_AgentNoHistoryPreventsHistoryPersistence(t *testing.T) {
 		t.Fatalf("processMessage() error = %v", err)
 	}
 
+	for _, msg := range provider.lastMessages {
+		if strings.Contains(msg.Content, "We decided to avoid global state") ||
+			strings.Contains(msg.Content, "request-scoped") {
+			t.Fatalf("no_history leaked previous history into LLM request: %#v", provider.lastMessages)
+		}
+	}
+
 	history := defaultAgent.Sessions.GetHistory(sessionKey)
-	if !reflect.DeepEqual(history, initialHistory) {
-		t.Fatalf("session history modified: got %#v want %#v", history, initialHistory)
+	if len(history) != len(initialHistory)+2 {
+		t.Fatalf("history length = %d, want %d: %#v", len(history), len(initialHistory)+2, history)
+	}
+	if !reflect.DeepEqual(history[:len(initialHistory)], initialHistory) {
+		t.Fatalf("initial history modified: got %#v want %#v", history[:len(initialHistory)], initialHistory)
+	}
+	if got := history[len(initialHistory)]; got.Role != "user" || got.Content != "how are you?" {
+		t.Fatalf("persisted user message = %#v", got)
+	}
+	if got := history[len(initialHistory)+1]; got.Role != "assistant" || got.Content != "Mock response" {
+		t.Fatalf("persisted assistant message = %#v", got)
 	}
 }
 

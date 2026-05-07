@@ -211,7 +211,7 @@ toolLoop:
 					)
 
 					messages = append(messages, toolResultMsg)
-					if !ts.opts.NoHistory {
+					if !ts.opts.SkipSessionPersistence {
 						ts.agent.Sessions.AddFullMessage(ts.sessionKey, toolResultMsg)
 						ts.recordPersistedMessage(toolResultMsg)
 						ts.ingestMessage(turnCtx, al, toolResultMsg)
@@ -257,7 +257,7 @@ toolLoop:
 									ToolCallID: skippedTC.ID,
 								}
 								messages = append(messages, skippedMsg)
-								if !ts.opts.NoHistory {
+								if !ts.opts.SkipSessionPersistence {
 									ts.agent.Sessions.AddFullMessage(ts.sessionKey, skippedMsg)
 									ts.recordPersistedMessage(skippedMsg)
 								}
@@ -273,7 +273,9 @@ toolLoop:
 								content := al.cfg.FilterSensitiveData(result.ForLLM)
 								msg := subTurnResultPromptMessage(content)
 								messages = append(messages, msg)
-								ts.agent.Sessions.AddFullMessage(ts.sessionKey, msg)
+								if !ts.opts.SkipSessionPersistence {
+									ts.agent.Sessions.AddFullMessage(ts.sessionKey, msg)
+								}
 							}
 						default:
 						}
@@ -304,7 +306,7 @@ toolLoop:
 					ToolCallID: tc.ID,
 				}
 				messages = append(messages, deniedMsg)
-				if !ts.opts.NoHistory {
+				if !ts.opts.SkipSessionPersistence {
 					ts.agent.Sessions.AddFullMessage(ts.sessionKey, deniedMsg)
 					ts.recordPersistedMessage(deniedMsg)
 				}
@@ -343,7 +345,7 @@ toolLoop:
 					ToolCallID: tc.ID,
 				}
 				messages = append(messages, deniedMsg)
-				if !ts.opts.NoHistory {
+				if !ts.opts.SkipSessionPersistence {
 					ts.agent.Sessions.AddFullMessage(ts.sessionKey, deniedMsg)
 					ts.recordPersistedMessage(deniedMsg)
 				}
@@ -600,7 +602,7 @@ toolLoop:
 			},
 		)
 		messages = append(messages, toolResultMsg)
-		if !ts.opts.NoHistory {
+		if !ts.opts.SkipSessionPersistence {
 			ts.agent.Sessions.AddFullMessage(ts.sessionKey, toolResultMsg)
 			ts.recordPersistedMessage(toolResultMsg)
 			ts.ingestMessage(turnCtx, al, toolResultMsg)
@@ -646,7 +648,7 @@ toolLoop:
 						ToolCallID: skippedTC.ID,
 					}
 					messages = append(messages, skippedMsg)
-					if !ts.opts.NoHistory {
+					if !ts.opts.SkipSessionPersistence {
 						ts.agent.Sessions.AddFullMessage(ts.sessionKey, skippedMsg)
 						ts.recordPersistedMessage(skippedMsg)
 					}
@@ -705,7 +707,7 @@ toolLoop:
 			Content:     handledToolResponseSummary,
 			Attachments: append([]providers.Attachment(nil), handledAttachments...),
 		}
-		if !ts.opts.NoHistory {
+		if !ts.opts.SkipSessionPersistence {
 			ts.agent.Sessions.AddFullMessage(ts.sessionKey, summaryMsg)
 			ts.recordPersistedMessage(summaryMsg)
 			ts.ingestMessage(turnCtx, al, summaryMsg)

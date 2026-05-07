@@ -89,7 +89,7 @@ type processOptions struct {
 	SendResponse            bool                   // Whether to send response via bus
 	AllowInterimPicoPublish bool                   // Whether pico tool-call interim text can be published when SendResponse is false
 	SuppressToolFeedback    bool                   // Whether to suppress inline tool feedback messages
-	NoHistory               bool                   // If true, don't load session history (for heartbeat)
+	NoHistory               bool                   // If true, don't load prior session history into the LLM context
 	SkipSessionPersistence  bool                   // If true, don't write this turn into session storage
 	SkipInitialSteeringPoll bool                   // If true, skip the steering poll at loop start (used by Continue)
 	InboundContext          *bus.InboundContext    // Normalized inbound facts for events/hooks

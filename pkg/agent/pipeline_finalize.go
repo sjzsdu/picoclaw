@@ -40,7 +40,7 @@ func (p *Pipeline) Finalize(
 
 	ts.setPhase(TurnPhaseFinalizing)
 	ts.setFinalContent(finalContent)
-	if !ts.opts.NoHistory {
+	if !ts.opts.SkipSessionPersistence {
 		finalMsg := providers.Message{
 			Role:             "assistant",
 			Content:          finalContent,

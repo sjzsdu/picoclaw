@@ -214,7 +214,7 @@ func (p *Pipeline) CallLLM(
 				"retry": retry,
 			})
 			exec.callMessages = stripMessageMedia(exec.callMessages)
-			if !ts.opts.NoHistory {
+			if !ts.opts.SkipSessionPersistence {
 				exec.history = stripMessageMedia(exec.history)
 				ts.agent.Sessions.SetHistory(ts.sessionKey, exec.history)
 				for i := range ts.persistedMessages {
@@ -517,7 +517,7 @@ func (p *Pipeline) CallLLM(
 		})
 	}
 	exec.messages = append(exec.messages, assistantMsg)
-	if !ts.opts.NoHistory {
+	if !ts.opts.SkipSessionPersistence {
 		ts.agent.Sessions.AddFullMessage(ts.sessionKey, assistantMsg)
 		ts.recordPersistedMessage(assistantMsg)
 		ts.ingestMessage(turnCtx, al, assistantMsg)
