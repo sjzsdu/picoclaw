@@ -39,27 +39,50 @@ function toChatAttachments({
   return merged.length > 0 ? merged : undefined
 }
 
+function shouldHideHistoryMessage(message: {
+  role: "user" | "assistant"
+  content: string
+  kind?: "normal" | "thought" | "tool_calls"
+  message_type?: "tool_feedback"
+}) {
+  if (message.role !== "assistant") {
+    return false
+  }
+
+  if (message.kind === "thought") {
+    return false
+  }
+
+  return message.message_type === "tool_feedback"
+}
+
 export async function loadSessionMessages(
   sessionId: string,
 ): Promise<ChatMessage[]> {
   const detail = await getSessionHistory(sessionId)
   const fallbackTime = detail.updated
 
-  return detail.messages.map((message, index) => ({
-    id: `hist-${index}-${Date.now()}`,
-    role: message.role,
-    content: message.content,
-    kind: message.role === "assistant" ? (message.kind ?? "normal") : undefined,
-    toolCalls:
-      message.role === "assistant"
-        ? parseToolCallsValue(message.tool_calls)
-        : undefined,
-    attachments: toChatAttachments({
-      media: message.media,
-      attachments: message.attachments,
-    }),
-    timestamp: fallbackTime,
-  }))
+  return detail.messages
+    .filter((message) => !shouldHideHistoryMessage(message))
+    .map((message, index) => ({
+      id: `hist-${index}-${Date.now()}`,
+      role: message.role,
+      content: message.content,
+      reasoningContent: message.reasoning_content,
+      kind:
+        message.role === "assistant"
+          ? (message.kind ?? "normal")
+          : undefined,
+      toolCalls:
+        message.role === "assistant"
+          ? parseToolCallsValue(message.tool_calls)
+          : undefined,
+      attachments: toChatAttachments({
+        media: message.media,
+        attachments: message.attachments,
+      }),
+      timestamp: fallbackTime,
+    }))
 }
 
 function normalizeMessageTimestamp(timestamp: number | string): string {

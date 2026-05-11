@@ -702,19 +702,22 @@ type ModelConfig struct {
 	Workspace   string `json:"workspace,omitempty"`    // Workspace path for CLI-based providers
 
 	// Optional optimizations
-	RPM                 int               `json:"rpm,omitempty"`              // Requests per minute limit
-	MaxTokensField      string            `json:"max_tokens_field,omitempty"` // Field name for max tokens (e.g., "max_completion_tokens")
+	RPM                 int               `json:"rpm,omitempty"`                    // Requests per minute limit
+	MaxTokensField      string            `json:"max_tokens_field,omitempty"`       // Field name for max tokens (e.g., "max_completion_tokens")
 	RequestTimeout      int               `json:"request_timeout,omitempty"`
-	ThinkingLevel       string            `json:"thinking_level,omitempty"`        // Extended thinking: off|low|medium|high|xhigh|adaptive
-	ToolSchemaTransform string            `json:"tool_schema_transform,omitempty"` // Optional tool schema compatibility transform (e.g. "simple")
-	ExtraBody           map[string]any    `json:"extra_body,omitempty"`            // Additional fields to inject into request body
-	CustomHeaders       map[string]string `json:"custom_headers,omitempty"`        // Additional headers to inject into every HTTP request
+	ThinkingLevel       string            `json:"thinking_level,omitempty"`          // Extended thinking: off|low|medium|high|xhigh|adaptive
+	ToolSchemaTransform string            `json:"tool_schema_transform,omitempty"`   // Optional tool schema compatibility transform (e.g. "simple")
+	DisableTools        bool              `json:"disable_tools,omitempty"`
+	ExtraBody           map[string]any    `json:"extra_body,omitempty"`              // Additional fields to inject into request body
+	CustomHeaders       map[string]string `json:"custom_headers,omitempty"`          // Additional headers to inject into every HTTP request
 
-	APIKeys SecureStrings `json:"api_keys,omitzero" yaml:"api_keys,omitempty"` // API authentication keys (multiple keys for failover)
+	APIKeys SecureStrings `json:"api_keys,omitzero" yaml:"api_keys,omitempty"`
 
-	// Enabled indicates whether this model entry is active. When omitted in
-	// existing configs, the field is inferred during load: models with API keys
-	// or the reserved "local-model" name are auto-enabled.
+	LastTestStatus   string `json:"last_test_status,omitempty" yaml:"last_test_status,omitempty"`
+	LastTestReason   string `json:"last_test_reason,omitempty" yaml:"last_test_reason,omitempty"`
+	LastTestMessage  string `json:"last_test_message,omitempty" yaml:"last_test_message,omitempty"`
+	LastTestedAtUnix int64  `json:"last_tested_at_unix,omitempty" yaml:"last_tested_at_unix,omitempty"`
+
 	Enabled bool `json:"enabled,omitempty" yaml:"enabled,omitempty"`
 	// UserAgent is the user agent string to use for HTTP requests.
 	UserAgent string `json:"user_agent,omitempty" yaml:"-"`

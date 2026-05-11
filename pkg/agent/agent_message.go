@@ -10,10 +10,18 @@ import (
 	"github.com/sipeed/picoclaw/pkg/bus"
 	"github.com/sipeed/picoclaw/pkg/constants"
 	"github.com/sipeed/picoclaw/pkg/logger"
+	"github.com/sipeed/picoclaw/pkg/providers"
 	"github.com/sipeed/picoclaw/pkg/routing"
 	"github.com/sipeed/picoclaw/pkg/session"
 	"github.com/sipeed/picoclaw/pkg/utils"
 )
+
+func defaultResponseForChannel(channel string) string {
+	if strings.EqualFold(strings.TrimSpace(channel), "pico") {
+		return ""
+	}
+	return defaultResponse
+}
 
 func (al *AgentLoop) buildContinuationTarget(msg bus.InboundMessage) (*continuationTarget, error) {
 	if msg.Channel == "system" {
@@ -65,6 +73,44 @@ func (al *AgentLoop) ProcessDirectWithChannel(
 	return al.processMessage(ctx, msg)
 }
 
+func (al *AgentLoop) ProcessDirectForAgent(
+	ctx context.Context,
+	content, sessionKey, agentID string,
+) (string, error) {
+	return al.ProcessDirectWithTarget(ctx, content, sessionKey, agentID, "cli", "direct")
+}
+
+func (al *AgentLoop) ProcessDirectWithTarget(
+	ctx context.Context,
+	content, sessionKey, agentID, channel, chatID string,
+) (string, error) {
+	if err := al.ensureHooksInitialized(ctx); err != nil {
+		return "", err
+	}
+	if err := al.ensureMCPInitialized(ctx); err != nil {
+		return "", err
+	}
+
+	raw := map[string]string{}
+	if trimmed := strings.TrimSpace(agentID); trimmed != "" {
+		raw["agent_id"] = trimmed
+	}
+
+	msg := bus.InboundMessage{
+		Context: bus.InboundContext{
+			Channel:  channel,
+			ChatID:   chatID,
+			ChatType: "direct",
+			SenderID: "cron",
+			Raw:      raw,
+		},
+		Content:    content,
+		SessionKey: sessionKey,
+	}
+
+	return al.processMessage(ctx, msg)
+}
+
 func (al *AgentLoop) ProcessHeartbeat(
 	ctx context.Context,
 	content, channel, chatID string,
@@ -93,12 +139,13 @@ func (al *AgentLoop) ProcessHeartbeat(
 		}
 	}
 	return al.runAgentLoop(ctx, agent, processOptions{
-		Dispatch:             dispatch,
-		DefaultResponse:      defaultResponse,
-		EnableSummary:        false,
-		SendResponse:         false,
-		SuppressToolFeedback: true,
-		NoHistory:            true, // Don't load session history for heartbeat
+		Dispatch:               dispatch,
+		DefaultResponse:        defaultResponseForChannel(channel),
+		EnableSummary:          false,
+		SendResponse:           false,
+		SuppressToolFeedback:   true,
+		NoHistory:              true, // Don't load session history for heartbeat
+		SkipSessionPersistence: true,
 	})
 }
 
@@ -151,10 +198,11 @@ func (al *AgentLoop) processMessage(ctx context.Context, msg bus.InboundMessage)
 		return "", routeErr
 	}
 
-	// CLI/direct channel messages must bypass routing and use the default agent.
-	// This preserves current-branch route/session conventions while ensuring
-	// command-channel messages (CLI) don't get dispatched to a non-default agent.
-	if msg.Context.Channel == "cli" || msg.Context.Channel == "direct" {
+	forcedAgentID := strings.TrimSpace(msg.Context.Raw["agent_id"])
+
+	// CLI/direct channel messages must bypass routing and use the default agent,
+	// unless the caller explicitly forced a target agent.
+	if forcedAgentID == "" && (msg.Context.Channel == "cli" || msg.Context.Channel == "direct") {
 		if def := al.GetRegistry().GetDefaultAgent(); def != nil {
 			agent = def
 			// Ensure the route snapshot reflects the default agent as well.
@@ -179,6 +227,7 @@ func (al *AgentLoop) processMessage(ctx context.Context, msg bus.InboundMessage)
 	logger.InfoCF("agent", "Routed message",
 		map[string]any{
 			"agent_id":           agent.ID,
+			"model_name":         agent.Model,
 			"scope_key":          scopeKey,
 			"session_key":        sessionKey,
 			"matched_by":         route.MatchedBy,
@@ -186,6 +235,15 @@ func (al *AgentLoop) processMessage(ctx context.Context, msg bus.InboundMessage)
 			"route_channel":      route.Channel,
 			"route_main_session": allocation.MainSessionKey,
 		})
+
+	if err := al.applyInboundModelOverride(agent, msg.Context.Raw["model_name"]); err != nil {
+		logger.WarnCF("agent", "Ignoring invalid inbound model override",
+			map[string]any{
+				"agent_id":   agent.ID,
+				"model_name": strings.TrimSpace(msg.Context.Raw["model_name"]),
+				"error":      err.Error(),
+			})
+	}
 
 	opts := processOptions{
 		Dispatch: DispatchRequest{
@@ -199,7 +257,7 @@ func (al *AgentLoop) processMessage(ctx context.Context, msg bus.InboundMessage)
 		},
 		SenderID:                msg.SenderID,
 		SenderDisplayName:       msg.Sender.DisplayName,
-		DefaultResponse:         defaultResponse,
+		DefaultResponse:         defaultResponseForChannel(msg.Channel),
 		EnableSummary:           true,
 		SendResponse:            false,
 		AllowInterimPicoPublish: true,
@@ -222,6 +280,53 @@ func (al *AgentLoop) processMessage(ctx context.Context, msg bus.InboundMessage)
 	}
 
 	return al.runAgentLoop(ctx, agent, opts)
+}
+
+func (al *AgentLoop) applyInboundModelOverride(agent *AgentInstance, modelName string) error {
+	if agent == nil {
+		return nil
+	}
+	modelName = strings.TrimSpace(modelName)
+	if modelName == "" || modelName == agent.Model {
+		return nil
+	}
+
+	modelCfg, err := resolvedModelConfig(al.cfg, modelName, agent.Workspace)
+	if err != nil {
+		return err
+	}
+
+	provider, resolvedModel, err := al.providerFactory(modelCfg)
+	if err != nil {
+		return fmt.Errorf("failed to initialize model %q: %w", modelName, err)
+	}
+	if strings.TrimSpace(resolvedModel) == "" {
+		resolvedModel = modelName
+	}
+
+	candidates := resolveModelCandidates(al.cfg, al.cfg.Agents.Defaults.Provider, modelName, agent.Fallbacks)
+	if len(candidates) == 0 {
+		return fmt.Errorf("model %q did not resolve to any provider candidates", modelName)
+	}
+
+	oldProvider := agent.Provider
+	agent.Model = modelName
+	agent.Provider = provider
+	agent.Candidates = candidates
+	agent.ThinkingLevel = parseThinkingLevel(modelCfg.ThinkingLevel)
+
+	if oldProvider != nil && oldProvider != provider {
+		if stateful, ok := oldProvider.(providers.StatefulProvider); ok {
+			stateful.Close()
+		}
+	}
+	logger.InfoCF("agent", "Applied inbound model override",
+		map[string]any{
+			"agent_id":       agent.ID,
+			"model_name":     modelName,
+			"resolved_model": resolvedModel,
+		})
+	return nil
 }
 
 func (al *AgentLoop) resolveMessageRoute(msg bus.InboundMessage) (routing.ResolvedRoute, *AgentInstance, error) {
@@ -265,7 +370,6 @@ func (al *AgentLoop) processSystemMessage(
 			"chat_id":   msg.ChatID,
 		})
 
-	// Parse origin channel from chat_id (format: "channel:chat_id")
 	var originChannel, originChatID string
 	if idx := strings.Index(msg.ChatID, ":"); idx > 0 {
 		originChannel = msg.ChatID[:idx]
@@ -275,14 +379,11 @@ func (al *AgentLoop) processSystemMessage(
 		originChatID = msg.ChatID
 	}
 
-	// Extract subagent result from message content
-	// Format: "Task 'label' completed.\n\nResult:\n<actual content>"
 	content := msg.Content
 	if idx := strings.Index(content, "Result:\n"); idx >= 0 {
-		content = content[idx+8:] // Extract just the result part
+		content = content[idx+8:]
 	}
 
-	// Skip internal channels - only log, don't send to user
 	if constants.IsInternalChannel(originChannel) {
 		logger.InfoCF("agent", "Subagent completed (internal channel)",
 			map[string]any{
@@ -293,13 +394,11 @@ func (al *AgentLoop) processSystemMessage(
 		return "", nil
 	}
 
-	// Use default agent for system messages
 	agent := al.GetRegistry().GetDefaultAgent()
 	if agent == nil {
 		return "", fmt.Errorf("no default agent for system message")
 	}
 
-	// Use the origin session for context
 	sessionKey := session.BuildMainSessionKey(agent.ID)
 	dispatch := DispatchRequest{
 		SessionKey:  sessionKey,

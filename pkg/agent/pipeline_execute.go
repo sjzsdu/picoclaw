@@ -189,6 +189,9 @@ toolLoop:
 					shouldSendForUser := !hookResult.Silent && hookResult.ForUser != "" &&
 						(ts.opts.SendResponse || hookResult.ResponseHandled)
 					if shouldSendForUser {
+						if ts.channel == "pico" {
+							exec.publishedPicoVisibleOutput = true
+						}
 						al.bus.PublishOutbound(ctx, bus.OutboundMessage{
 							Context: bus.InboundContext{
 								Channel: ts.channel,
@@ -241,6 +244,9 @@ toolLoop:
 								hookResult.IsError = true
 								hookResult.ForLLM = fmt.Sprintf("failed to deliver attachment: %v", err)
 							} else {
+								if ts.channel == "pico" {
+									exec.publishedPicoVisibleOutput = true
+								}
 								handledAttachments = append(
 									handledAttachments,
 									buildProviderAttachments(al.mediaStore, hookResult.Media)...,
@@ -297,7 +303,7 @@ toolLoop:
 					)
 
 					messages = append(messages, toolResultMsg)
-					if !ts.opts.NoHistory {
+					if !ts.opts.SkipSessionPersistence {
 						ts.agent.Sessions.AddFullMessage(ts.sessionKey, toolResultMsg)
 						ts.recordPersistedMessage(toolResultMsg)
 						ts.ingestMessage(turnCtx, al, toolResultMsg)
@@ -343,7 +349,7 @@ toolLoop:
 									ToolCallID: skippedTC.ID,
 								}
 								messages = append(messages, skippedMsg)
-								if !ts.opts.NoHistory {
+								if !ts.opts.SkipSessionPersistence {
 									ts.agent.Sessions.AddFullMessage(ts.sessionKey, skippedMsg)
 									ts.recordPersistedMessage(skippedMsg)
 								}
@@ -359,7 +365,9 @@ toolLoop:
 								content := al.cfg.FilterSensitiveData(result.ForLLM)
 								msg := subTurnResultPromptMessage(content)
 								messages = append(messages, msg)
-								ts.agent.Sessions.AddFullMessage(ts.sessionKey, msg)
+								if !ts.opts.SkipSessionPersistence {
+									ts.agent.Sessions.AddFullMessage(ts.sessionKey, msg)
+								}
 							}
 						default:
 						}
@@ -390,7 +398,7 @@ toolLoop:
 					ToolCallID: tc.ID,
 				}
 				messages = append(messages, deniedMsg)
-				if !ts.opts.NoHistory {
+				if !ts.opts.SkipSessionPersistence {
 					ts.agent.Sessions.AddFullMessage(ts.sessionKey, deniedMsg)
 					ts.recordPersistedMessage(deniedMsg)
 				}
@@ -429,7 +437,7 @@ toolLoop:
 					ToolCallID: tc.ID,
 				}
 				messages = append(messages, deniedMsg)
-				if !ts.opts.NoHistory {
+				if !ts.opts.SkipSessionPersistence {
 					ts.agent.Sessions.AddFullMessage(ts.sessionKey, deniedMsg)
 					ts.recordPersistedMessage(deniedMsg)
 				}
@@ -475,6 +483,9 @@ toolLoop:
 		asyncToolName := toolName
 		asyncCallback := func(_ context.Context, result *tools.ToolResult) {
 			if !result.Silent && result.ForUser != "" {
+				if ts.channel == "pico" {
+					exec.publishedPicoVisibleOutput = true
+				}
 				outCtx, outCancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer outCancel()
 				_ = al.bus.PublishOutbound(outCtx, outboundMessageForTurn(ts, result.ForUser))
@@ -576,6 +587,10 @@ toolLoop:
 			toolResult = tools.ErrorResult("hook returned nil tool result")
 		}
 
+		if picoToolDeliveredVisibleOutput(ts.channel, toolName, toolResult) {
+			exec.publishedPicoVisibleOutput = true
+		}
+
 		if len(toolResult.Media) > 0 && toolResult.ResponseHandled {
 			parts := make([]bus.MediaPart, 0, len(toolResult.Media))
 			for _, ref := range toolResult.Media {
@@ -615,6 +630,9 @@ toolLoop:
 						})
 					toolResult = tools.ErrorResult(fmt.Sprintf("failed to deliver attachment: %v", err)).WithError(err)
 				} else {
+					if ts.channel == "pico" {
+						exec.publishedPicoVisibleOutput = true
+					}
 					handledAttachments = append(
 						handledAttachments,
 						buildProviderAttachments(al.mediaStore, toolResult.Media)...,
@@ -638,6 +656,9 @@ toolLoop:
 			toolResult.ForUser != "" &&
 			(ts.opts.SendResponse || toolResult.ResponseHandled)
 		if shouldSendForUser {
+			if ts.channel == "pico" {
+				exec.publishedPicoVisibleOutput = true
+			}
 			al.bus.PublishOutbound(ctx, outboundMessageForTurn(ts, toolResult.ForUser))
 			logger.DebugCF("agent", "Sent tool result to user",
 				map[string]any{
@@ -678,7 +699,7 @@ toolLoop:
 			inferSkillNamesFromToolCall(ts, toolName, toolArgs),
 		)
 		messages = append(messages, toolResultMsg)
-		if !ts.opts.NoHistory {
+		if !ts.opts.SkipSessionPersistence {
 			ts.agent.Sessions.AddFullMessage(ts.sessionKey, toolResultMsg)
 			ts.recordPersistedMessage(toolResultMsg)
 			ts.ingestMessage(turnCtx, al, toolResultMsg)
@@ -724,7 +745,7 @@ toolLoop:
 						ToolCallID: skippedTC.ID,
 					}
 					messages = append(messages, skippedMsg)
-					if !ts.opts.NoHistory {
+					if !ts.opts.SkipSessionPersistence {
 						ts.agent.Sessions.AddFullMessage(ts.sessionKey, skippedMsg)
 						ts.recordPersistedMessage(skippedMsg)
 					}
@@ -748,6 +769,7 @@ toolLoop:
 	}
 
 	exec.messages = messages
+	p.publishPendingPicoInterimContent(turnCtx, ts, exec, iteration)
 
 	// Continue if pending steering exists (regardless of allResponsesHandled).
 	// This covers the case where tools were partially executed and skipped due to steering,
@@ -782,7 +804,7 @@ toolLoop:
 			Content:     handledToolResponseSummary,
 			Attachments: append([]providers.Attachment(nil), handledAttachments...),
 		}
-		if !ts.opts.NoHistory {
+		if !ts.opts.SkipSessionPersistence {
 			ts.agent.Sessions.AddFullMessage(ts.sessionKey, summaryMsg)
 			ts.recordPersistedMessage(summaryMsg)
 			ts.ingestMessage(turnCtx, al, summaryMsg)
@@ -799,6 +821,7 @@ toolLoop:
 				SessionKey: ts.sessionKey,
 				Reason:     ContextCompressReasonSummarize,
 				Budget:     ts.agent.ContextWindow,
+				Agent:      ts.agent,
 			})
 		}
 		ts.setPhase(TurnPhaseCompleted)
@@ -823,4 +846,35 @@ toolLoop:
 		"agent_id": ts.agent.ID, "iteration": iteration,
 	})
 	return ToolControlContinue
+}
+
+func (p *Pipeline) publishPendingPicoInterimContent(
+	turnCtx context.Context,
+	ts *turnState,
+	exec *turnExecution,
+	iteration int,
+) {
+	if exec.pendingPicoInterimContent == "" {
+		return
+	}
+	defer func() {
+		exec.pendingPicoInterimContent = ""
+	}()
+	if ts.channel != "pico" || exec.publishedPicoVisibleOutput {
+		return
+	}
+
+	outCtx, outCancel := context.WithTimeout(turnCtx, 3*time.Second)
+	publishErr := p.al.bus.PublishOutbound(outCtx, outboundMessageForTurn(ts, exec.pendingPicoInterimContent))
+	outCancel()
+	if publishErr != nil {
+		logger.WarnCF("agent", "Failed to publish pico interim tool-call content", map[string]any{
+			"error":     publishErr.Error(),
+			"channel":   ts.channel,
+			"chat_id":   ts.chatID,
+			"iteration": iteration,
+		})
+		return
+	}
+	exec.publishedPicoVisibleOutput = true
 }

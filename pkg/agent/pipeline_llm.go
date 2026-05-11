@@ -222,7 +222,7 @@ func (p *Pipeline) CallLLM(
 				"retry": retry,
 			})
 			exec.callMessages = stripMessageMedia(exec.callMessages)
-			if !ts.opts.NoHistory {
+			if !ts.opts.SkipSessionPersistence {
 				exec.history = stripMessageMedia(exec.history)
 				ts.agent.Sessions.SetHistory(ts.sessionKey, exec.history)
 				for i := range ts.persistedMessages {
@@ -349,6 +349,7 @@ func (p *Pipeline) CallLLM(
 				SessionKey: ts.sessionKey,
 				Reason:     ContextCompressReasonRetry,
 				Budget:     ts.agent.ContextWindow,
+				Agent:      ts.agent,
 			}); compactErr != nil {
 				logger.WarnCF("agent", "Context overflow compact failed", map[string]any{
 					"session_key": ts.sessionKey,
@@ -360,6 +361,7 @@ func (p *Pipeline) CallLLM(
 				SessionKey: ts.sessionKey,
 				Budget:     ts.agent.ContextWindow,
 				MaxTokens:  ts.agent.MaxTokens,
+				Agent:      ts.agent,
 			}); asmErr == nil && asmResp != nil {
 				exec.history = asmResp.History
 				exec.summary = asmResp.Summary
@@ -434,11 +436,14 @@ func (p *Pipeline) CallLLM(
 
 	reasoningContent := responseReasoningContent(exec.response)
 	shouldPublishPicoToolCallInterim := ts.channel == "pico" && len(exec.response.ToolCalls) > 0
+	publishedPicoInterim := false
 	if shouldPublishPicoToolCallInterim {
 		// Pico tool-call turns publish their reasoning/content/tool summary as a
 		// structured sequence after the tool-call payload is normalized below.
+		exec.publishedPicoReasoning = strings.TrimSpace(reasoningContent) != ""
 	} else if ts.channel == "pico" {
-		go al.publishPicoReasoning(turnCtx, reasoningContent, ts.chatID)
+		exec.publishedPicoReasoning = strings.TrimSpace(reasoningContent) != ""
+		go al.publishPicoReasoning(turnCtx, reasoningContent, ts.chatID, ts.agent.ID)
 	} else {
 		go al.handleReasoning(
 			turnCtx,
@@ -472,6 +477,20 @@ func (p *Pipeline) CallLLM(
 		llmResponseFields["total_tokens"] = exec.response.Usage.TotalTokens
 	}
 	logger.DebugCF("agent", "LLM response", llmResponseFields)
+
+	if al.bus != nil &&
+		ts.channel == "pico" &&
+		len(exec.response.ToolCalls) > 0 &&
+		ts.opts.AllowInterimPicoPublish &&
+		!shouldPublishToolFeedback(al.cfg, ts) &&
+		!publishedPicoInterim {
+		exec.pendingPicoInterimContent = ""
+		if strings.TrimSpace(exec.response.Content) != "" {
+			exec.pendingPicoInterimContent = exec.response.Content
+		}
+	} else {
+		exec.pendingPicoInterimContent = ""
+	}
 
 	// No-tool-call path: steering check and direct response
 	if len(exec.response.ToolCalls) == 0 || exec.gracefulTerminal {
@@ -555,19 +574,22 @@ func (p *Pipeline) CallLLM(
 		})
 	}
 	exec.messages = append(exec.messages, assistantMsg)
-	if !ts.opts.NoHistory {
+	if !ts.opts.SkipSessionPersistence {
 		ts.agent.Sessions.AddFullMessage(ts.sessionKey, assistantMsg)
 		ts.recordPersistedMessage(assistantMsg)
 		ts.ingestMessage(turnCtx, al, assistantMsg)
 	}
 	if shouldPublishPicoToolCallInterim {
-		al.publishPicoToolCallInterim(
+		publishedPicoInterim = al.publishPicoToolCallInterim(
 			turnCtx,
 			ts,
 			reasoningContent,
 			exec.response.Content,
 			assistantMsg.ToolCalls,
 		)
+		if publishedPicoInterim {
+			exec.publishedPicoVisibleOutput = true
+		}
 	}
 
 	return ControlToolLoop, nil

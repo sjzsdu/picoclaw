@@ -100,7 +100,7 @@ func (al *AgentLoop) targetReasoningChannelID(channelName string) (chatID string
 	return ""
 }
 
-func (al *AgentLoop) publishPicoReasoning(ctx context.Context, reasoningContent, chatID string) {
+func (al *AgentLoop) publishPicoReasoning(ctx context.Context, reasoningContent, chatID, agentID string) {
 	if reasoningContent == "" || chatID == "" {
 		return
 	}
@@ -121,6 +121,7 @@ func (al *AgentLoop) publishPicoReasoning(ctx context.Context, reasoningContent,
 			},
 		},
 		Content: reasoningContent,
+		AgentID: agentID,
 	}); err != nil {
 		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) ||
 			errors.Is(err, bus.ErrBusClosed) {
@@ -143,11 +144,12 @@ func (al *AgentLoop) publishPicoToolCallInterim(
 	reasoningContent string,
 	content string,
 	toolCalls []providers.ToolCall,
-) {
+) bool {
 	if ts == nil || ts.chatID == "" || al == nil || al.bus == nil {
-		return
+		return false
 	}
 
+	visiblePublished := false
 	if strings.TrimSpace(reasoningContent) != "" {
 		pubCtx, pubCancel := context.WithTimeout(ctx, 3*time.Second)
 		err := al.bus.PublishOutbound(
@@ -167,7 +169,7 @@ func (al *AgentLoop) publishPicoToolCallInterim(
 	}
 
 	if !ts.opts.AllowInterimPicoPublish {
-		return
+		return visiblePublished
 	}
 
 	visibleToolCalls := utils.BuildVisibleToolCalls(
@@ -176,6 +178,13 @@ func (al *AgentLoop) publishPicoToolCallInterim(
 	)
 	duplicateToolCallContent := len(visibleToolCalls) > 0 &&
 		utils.ToolCallExplanationDuplicatesContent(content, toolCalls)
+	messageOnlyToolCalls := len(toolCalls) > 0
+	for _, tc := range toolCalls {
+		if strings.TrimSpace(tc.Name) != "message" {
+			messageOnlyToolCalls = false
+			break
+		}
+	}
 
 	if strings.TrimSpace(content) != "" && !duplicateToolCallContent {
 		pubCtx, pubCancel := context.WithTimeout(ctx, 3*time.Second)
@@ -189,11 +198,13 @@ func (al *AgentLoop) publishPicoToolCallInterim(
 				"chat_id": ts.chatID,
 				"error":   err.Error(),
 			})
+		} else {
+			visiblePublished = true
 		}
 	}
 
-	if len(visibleToolCalls) == 0 {
-		return
+	if len(visibleToolCalls) == 0 || messageOnlyToolCalls {
+		return visiblePublished
 	}
 
 	rawToolCalls, err := json.Marshal(visibleToolCalls)
@@ -203,7 +214,7 @@ func (al *AgentLoop) publishPicoToolCallInterim(
 			"chat_id": ts.chatID,
 			"error":   err.Error(),
 		})
-		return
+		return visiblePublished
 	}
 
 	msg := outboundMessageForTurnWithKind(ts, "", messageKindToolCalls)
@@ -223,7 +234,9 @@ func (al *AgentLoop) publishPicoToolCallInterim(
 			"chat_id": ts.chatID,
 			"error":   err.Error(),
 		})
+		return visiblePublished
 	}
+	return true
 }
 
 func (al *AgentLoop) handleReasoning(

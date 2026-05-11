@@ -1,7 +1,9 @@
-import { IconChevronDown } from "@tabler/icons-react"
+import { IconChevronDown, IconLoader2 } from "@tabler/icons-react"
 import { useState } from "react"
+import { useTranslation } from "react-i18next"
 
 import type { ModelInfo } from "@/api/models"
+import { Button } from "@/components/ui/button"
 
 import { ModelCard } from "./model-card"
 import { ProviderIcon } from "./provider-icon"
@@ -11,8 +13,12 @@ interface ProviderSectionProps {
   providerKey: string
   models: ModelInfo[]
   onEdit: (model: ModelInfo) => void
+  onTest: (model: ModelInfo) => void
+  onTestAll: (providerKey: string) => void
   onSetDefault: (model: ModelInfo) => void
   onDelete: (model: ModelInfo) => void
+  testingIndex: number | null
+  testingAll: boolean
   settingDefaultIndex: number | null
 }
 
@@ -21,10 +27,15 @@ export function ProviderSection({
   providerKey,
   models,
   onEdit,
+  onTest,
+  onTestAll,
   onSetDefault,
   onDelete,
+  testingIndex,
+  testingAll,
   settingDefaultIndex,
 }: ProviderSectionProps) {
+  const { t } = useTranslation()
   const [open, setOpen] = useState(true)
 
   return (
@@ -43,7 +54,21 @@ export function ProviderSection({
           </span>
         </span>
         <div className="border-border/40 border-t" />
-        <span className="flex justify-end">
+        <span className="flex items-center justify-end gap-1">
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={(event) => {
+              event.stopPropagation()
+              onTestAll(providerKey)
+            }}
+            disabled={testingAll}
+          >
+            {testingAll ? (
+              <IconLoader2 className="size-4 animate-spin" />
+            ) : null}
+            {t("models.action.testAll")}
+          </Button>
           <IconChevronDown
             className={[
               "text-muted-foreground size-4 transition-transform",
@@ -60,8 +85,11 @@ export function ProviderSection({
               key={model.index}
               model={model}
               onEdit={onEdit}
+              onTest={onTest}
               onSetDefault={onSetDefault}
               onDelete={onDelete}
+              testing={testingIndex === model.index}
+              testingAll={testingAll}
               settingDefault={settingDefaultIndex === model.index}
             />
           ))}

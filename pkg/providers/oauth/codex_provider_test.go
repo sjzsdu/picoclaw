@@ -374,6 +374,41 @@ func TestCodexProvider_ChatRoundTrip(t *testing.T) {
 	}
 }
 
+func TestCodexProvider_ChatRoundTrip_UsesStreamedTextWhenCompletedEventHasNoOutput(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/responses" {
+			http.Error(w, "not found: "+r.URL.Path, http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "event: response.output_text.delta\n")
+		fmt.Fprint(w, "data: {\"type\":\"response.output_text.delta\",\"sequence_number\":1,\"item_id\":\"msg_1\",\"output_index\":0,\"content_index\":0,\"delta\":\"Hi \",\"logprobs\":[]}\n\n")
+		fmt.Fprint(w, "event: response.output_text.delta\n")
+		fmt.Fprint(w, "data: {\"type\":\"response.output_text.delta\",\"sequence_number\":2,\"item_id\":\"msg_1\",\"output_index\":0,\"content_index\":0,\"delta\":\"there!\",\"logprobs\":[]}\n\n")
+		fmt.Fprint(w, "event: response.completed\n")
+		fmt.Fprint(w, "data: {\"type\":\"response.completed\",\"sequence_number\":3,\"response\":{\"id\":\"resp_test\",\"object\":\"response\",\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":12,\"output_tokens\":6,\"total_tokens\":18,\"input_tokens_details\":{\"cached_tokens\":0},\"output_tokens_details\":{\"reasoning_tokens\":0}}}}\n\n")
+		fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	provider := NewCodexProvider("test-token", "acc-123")
+	provider.client = createOpenAITestClient(server.URL, "test-token", "acc-123")
+
+	resp, err := provider.Chat(t.Context(), []Message{{Role: "user", Content: "Hello"}}, nil, "gpt-5.4", nil)
+	if err != nil {
+		t.Fatalf("Chat() error: %v", err)
+	}
+	if resp.Content != "Hi there!" {
+		t.Fatalf("Content = %q, want %q", resp.Content, "Hi there!")
+	}
+	if resp.FinishReason != "stop" {
+		t.Fatalf("FinishReason = %q, want stop", resp.FinishReason)
+	}
+	if resp.Usage == nil || resp.Usage.TotalTokens != 18 {
+		t.Fatalf("Usage = %#v, want total_tokens=18", resp.Usage)
+	}
+}
+
 func TestCodexProvider_ChatRoundTrip_WebSearchDisabled(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/responses" {

@@ -644,19 +644,43 @@ func formatCurrentSenderLine(senderID, senderDisplayName string) string {
 	}
 }
 
-func (cb *ContextBuilder) buildDynamicContext(
-	channel, chatID, senderID, senderDisplayName string,
-) string {
+func formatRuntimeModelContext(modelName, provider, modelID string) string {
+	modelName = strings.TrimSpace(modelName)
+	provider = strings.TrimSpace(provider)
+	modelID = strings.TrimSpace(modelID)
+	if modelName == "" && provider == "" && modelID == "" {
+		return ""
+	}
+
+	lines := []string{
+		"Use this section when the user asks what model or provider you are running on; do not inspect config files for this information.",
+	}
+	if modelName != "" {
+		lines = append(lines, "Model alias: "+modelName)
+	}
+	if provider != "" {
+		lines = append(lines, "Provider: "+provider)
+	}
+	if modelID != "" {
+		lines = append(lines, "Model ID: "+modelID)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (cb *ContextBuilder) buildDynamicContext(req PromptBuildRequest) string {
 	now := time.Now().Format("2006-01-02 15:04 (Monday)")
 	rt := fmt.Sprintf("%s %s, Go %s", runtime.GOOS, runtime.GOARCH, runtime.Version())
 
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "## Current Time\n%s\n\n## Runtime\n%s", now, rt)
 
-	if channel != "" && chatID != "" {
-		fmt.Fprintf(&sb, "\n\n## Current Session\nChannel: %s\nChat ID: %s", channel, chatID)
+	if modelCtx := formatRuntimeModelContext(req.RuntimeModelName, req.RuntimeProvider, req.RuntimeModelID); modelCtx != "" {
+		fmt.Fprintf(&sb, "\n\n## Current Model\n%s", modelCtx)
 	}
-	if senderLine := formatCurrentSenderLine(senderID, senderDisplayName); senderLine != "" {
+	if req.Channel != "" && req.ChatID != "" {
+		fmt.Fprintf(&sb, "\n\n## Current Session\nChannel: %s\nChat ID: %s", req.Channel, req.ChatID)
+	}
+	if senderLine := formatCurrentSenderLine(req.SenderID, req.SenderDisplayName); senderLine != "" {
 		fmt.Fprintf(&sb, "\n\n## Current Sender\n%s", senderLine)
 	}
 
@@ -699,7 +723,7 @@ func (cb *ContextBuilder) BuildMessagesFromPrompt(req PromptBuildRequest) []prov
 	staticPrompt := cb.BuildSystemPromptWithCache()
 
 	// Build short dynamic context (time, runtime, session) — changes per request
-	dynamicCtx := cb.buildDynamicContext(req.Channel, req.ChatID, req.SenderID, req.SenderDisplayName)
+	dynamicCtx := cb.buildDynamicContext(req)
 
 	// Compose a single system message: static (cached) + dynamic + optional summary.
 	// Keeping all system content in one message ensures every provider adapter can

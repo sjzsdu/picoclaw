@@ -8,6 +8,7 @@ import { refreshGatewayState } from "@/store/gateway"
 
 interface UseChatModelsOptions {
   isConnected: boolean
+  activeSessionId?: string
 }
 
 function isLocalModel(model: ModelInfo): boolean {
@@ -21,10 +22,14 @@ function isLocalModel(model: ModelInfo): boolean {
   )
 }
 
-export function useChatModels({ isConnected }: UseChatModelsOptions) {
+export function useChatModels({
+  isConnected,
+  activeSessionId,
+}: UseChatModelsOptions) {
   const { t } = useTranslation()
   const [modelList, setModelList] = useState<ModelInfo[]>([])
   const [defaultModelName, setDefaultModelName] = useState("")
+  const [loadError, setLoadError] = useState<string | null>(null)
   const setDefaultRequestIdRef = useRef(0)
 
   const syncDefaultModelName = useCallback(
@@ -40,11 +45,17 @@ export function useChatModels({ isConnected }: UseChatModelsOptions) {
 
   const loadModels = useCallback(async () => {
     try {
+      setLoadError(null)
       const data = await getModels()
       setModelList(data.models)
       syncDefaultModelName(data.models, data.default_model)
-    } catch {
-      // silently fail
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unknown error"
+      console.error("Failed to load models:", msg)
+      setLoadError(msg)
+      toast.error(
+        "Failed to load models. Please check your connection and refresh.",
+      )
     }
   }, [syncDefaultModelName])
 
@@ -54,7 +65,7 @@ export function useChatModels({ isConnected }: UseChatModelsOptions) {
     }, 0)
 
     return () => clearTimeout(timerId)
-  }, [isConnected, loadModels])
+  }, [isConnected, activeSessionId, loadModels])
 
   const handleSetDefault = useCallback(
     async (modelName: string) => {
@@ -126,5 +137,6 @@ export function useChatModels({ isConnected }: UseChatModelsOptions) {
     oauthModels,
     localModels,
     handleSetDefault,
+    loadError,
   }
 }

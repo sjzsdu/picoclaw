@@ -67,6 +67,7 @@ func NewAgentLoop(
 		cfg:               cfg,
 		registry:          registry,
 		state:             stateManager,
+		workerID:          -1,
 		fallback:          fallbackChain,
 		cmdRegistry:       commands.NewRegistry(commands.BuiltinDefinitions()),
 		evolution:         bridge,

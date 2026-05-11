@@ -14,6 +14,19 @@ import (
 	"github.com/sipeed/picoclaw/pkg/providers"
 )
 
+func fallbackForEmptyFinalContent(ts *turnState, al *AgentLoop, exec *turnExecution) string {
+	if ts.channel == "pico" &&
+		(exec.publishedPicoReasoning ||
+			exec.publishedPicoVisibleOutput ||
+			al.picoMessageToolSentToCurrentChat(ts)) {
+		return ""
+	}
+	if ts.channel == "pico" {
+		return defaultResponse
+	}
+	return ts.opts.DefaultResponse
+}
+
 func (al *AgentLoop) runTurn(ctx context.Context, ts *turnState, pipeline *Pipeline) (turnResult, error) {
 	turnCtx, turnCancel := context.WithCancel(ctx)
 	defer turnCancel()
@@ -155,7 +168,7 @@ func (al *AgentLoop) runTurn(ctx context.Context, ts *turnState, pipeline *Pipel
 			for i, pm := range pendingMessages {
 				messages = append(messages, resolvedPending[i])
 				totalContentLen += len(pm.Content)
-				if !ts.opts.NoHistory {
+				if !ts.opts.SkipSessionPersistence {
 					ts.agent.Sessions.AddFullMessage(ts.sessionKey, pm)
 					ts.recordPersistedMessage(pm)
 					ts.ingestMessage(turnCtx, al, pm)
@@ -217,7 +230,7 @@ func (al *AgentLoop) runTurn(ctx context.Context, ts *turnState, pipeline *Pipel
 			}
 			// Ensure empty response falls back to DefaultResponse
 			if finalContent == "" {
-				finalContent = ts.opts.DefaultResponse
+				finalContent = fallbackForEmptyFinalContent(ts, al, exec)
 			}
 			result, finalizeErr := pipeline.Finalize(ctx, turnCtx, ts, exec, turnStatus, finalContent)
 			if finalizeErr != nil {
@@ -249,6 +262,8 @@ func (al *AgentLoop) runTurn(ctx context.Context, ts *turnState, pipeline *Pipel
 				// - allResponsesHandled=false: coordinator applies DefaultResponse before finalize
 				if exec.allResponsesHandled {
 					finalContent = ""
+				} else if finalContent == "" {
+					finalContent = fallbackForEmptyFinalContent(ts, al, exec)
 				}
 				result, finalizeErr := pipeline.Finalize(ctx, turnCtx, ts, exec, turnStatus, finalContent)
 				if finalizeErr != nil {
@@ -268,7 +283,7 @@ func (al *AgentLoop) runTurn(ctx context.Context, ts *turnState, pipeline *Pipel
 		if ts.currentIteration() >= ts.agent.MaxIterations && ts.agent.MaxIterations > 0 {
 			finalContent = toolLimitResponse
 		} else {
-			finalContent = ts.opts.DefaultResponse
+			finalContent = fallbackForEmptyFinalContent(ts, al, exec)
 		}
 	}
 
@@ -287,7 +302,7 @@ func (al *AgentLoop) runTurn(ctx context.Context, ts *turnState, pipeline *Pipel
 
 func (al *AgentLoop) abortTurn(ts *turnState) (turnResult, error) {
 	ts.setPhase(TurnPhaseAborted)
-	if !ts.opts.NoHistory {
+	if !ts.opts.SkipSessionPersistence {
 		if err := ts.restoreSession(ts.agent); err != nil {
 			al.emitEvent(
 				runtimeevents.KindAgentError,
@@ -393,6 +408,7 @@ func (al *AgentLoop) askSideQuestion(
 			SessionKey: opts.SessionKey,
 			Budget:     agent.ContextWindow,
 			MaxTokens:  agent.MaxTokens,
+			Agent:      agent,
 		}); err == nil && resp != nil {
 			history = resp.History
 			summary = resp.Summary

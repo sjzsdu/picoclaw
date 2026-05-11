@@ -30,29 +30,37 @@ func NewAgentRegistry(
 		resolver: routing.NewRouteResolver(cfg),
 	}
 
+	mainConfig := &config.AgentConfig{
+		ID:      routing.DefaultAgentID,
+		Default: true,
+		Name:    "Main",
+	}
 	agentConfigs := cfg.Agents.List
-	if len(agentConfigs) == 0 {
-		implicitAgent := &config.AgentConfig{
-			ID:      "main",
-			Default: true,
+	for i := range agentConfigs {
+		if routing.NormalizeAgentID(agentConfigs[i].ID) == routing.DefaultAgentID {
+			mainConfig = &agentConfigs[i]
+			break
 		}
-		instance := NewAgentInstance(implicitAgent, &cfg.Agents.Defaults, cfg, provider)
-		registry.agents["main"] = instance
-		logger.InfoCF("agent", "Created implicit main agent (no agents.list configured)", nil)
-	} else {
-		for i := range agentConfigs {
-			ac := &agentConfigs[i]
-			id := routing.NormalizeAgentID(ac.ID)
-			instance := NewAgentInstance(ac, &cfg.Agents.Defaults, cfg, provider)
-			registry.agents[id] = instance
-			logger.InfoCF("agent", "Registered agent",
-				map[string]any{
-					"agent_id":  id,
-					"name":      ac.Name,
-					"workspace": instance.Workspace,
-					"model":     instance.Model,
-				})
+	}
+	logger.InfoCF("agent", "Created implicit main agent", nil)
+	mainInstance := NewAgentInstance(mainConfig, &cfg.Agents.Defaults, cfg, provider)
+	registry.agents[routing.DefaultAgentID] = mainInstance
+
+	for i := range agentConfigs {
+		ac := &agentConfigs[i]
+		id := routing.NormalizeAgentID(ac.ID)
+		if id == routing.DefaultAgentID {
+			continue
 		}
+		instance := NewAgentInstance(ac, &cfg.Agents.Defaults, cfg, provider)
+		registry.agents[id] = instance
+		logger.InfoCF("agent", "Registered agent",
+			map[string]any{
+				"agent_id":  id,
+				"name":      ac.Name,
+				"workspace": instance.Workspace,
+				"model":     instance.Model,
+			})
 	}
 
 	for _, instance := range registry.agents {
@@ -179,8 +187,11 @@ func (r *AgentRegistry) GetDefaultAgent() *AgentInstance {
 			return agent
 		}
 	}
-	for id := range r.agents {
-		return r.agents[id]
+	if agent, ok := r.agents[routing.DefaultAgentID]; ok {
+		return agent
+	}
+	for _, agent := range r.agents {
+		return agent
 	}
 	return nil
 }

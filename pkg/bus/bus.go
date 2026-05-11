@@ -59,12 +59,19 @@ type EventPublisher interface {
 }
 
 func NewMessageBus() *MessageBus {
+	return NewMessageBusWithBuffer(defaultBusBufferSize)
+}
+
+func NewMessageBusWithBuffer(bufferSize int) *MessageBus {
+	if bufferSize <= 0 {
+		bufferSize = defaultBusBufferSize
+	}
 	return &MessageBus{
-		inbound:       make(chan InboundMessage, defaultBusBufferSize),
-		outbound:      make(chan OutboundMessage, defaultBusBufferSize),
-		outboundMedia: make(chan OutboundMediaMessage, defaultBusBufferSize),
-		audioChunks:   make(chan AudioChunk, defaultBusBufferSize*4), // Audio chunks need more buffer.
-		voiceControls: make(chan VoiceControl, defaultBusBufferSize),
+		inbound:       make(chan InboundMessage, bufferSize),
+		outbound:      make(chan OutboundMessage, bufferSize),
+		outboundMedia: make(chan OutboundMediaMessage, bufferSize),
+		audioChunks:   make(chan AudioChunk, bufferSize*4), // Audio chunks need more buffer.
+		voiceControls: make(chan VoiceControl, bufferSize),
 		done:          make(chan struct{}),
 	}
 }

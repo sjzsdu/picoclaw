@@ -118,7 +118,10 @@ type turnExecution struct {
 	summary         string
 
 	// Turn output
-	finalContent string
+	finalContent               string
+	publishedPicoReasoning     bool
+	publishedPicoVisibleOutput bool
+	pendingPicoInterimContent  string
 
 	// Iteration tracking
 	iteration int
