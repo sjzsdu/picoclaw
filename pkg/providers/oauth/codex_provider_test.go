@@ -409,6 +409,75 @@ func TestCodexProvider_ChatRoundTrip_UsesStreamedTextWhenCompletedEventHasNoOutp
 	}
 }
 
+func TestCodexProvider_ChatRoundTrip_RecoversContentFromOutputItemDoneEvent(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/responses" {
+			http.Error(w, "not found: "+r.URL.Path, http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "event: response.output_item.done\n")
+		fmt.Fprint(w, "data: {\"type\":\"response.output_item.done\",\"sequence_number\":1,\"output_index\":0,\"item\":{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"status\":\"completed\",\"content\":[{\"type\":\"output_text\",\"text\":\"Recovered from output item\"}]}}\n\n")
+		fmt.Fprint(w, "event: response.completed\n")
+		fmt.Fprint(w, "data: {\"type\":\"response.completed\",\"sequence_number\":2,\"response\":{\"id\":\"resp_test\",\"object\":\"response\",\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":12,\"output_tokens\":6,\"total_tokens\":18,\"input_tokens_details\":{\"cached_tokens\":0},\"output_tokens_details\":{\"reasoning_tokens\":0}}}}\n\n")
+		fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	provider := NewCodexProvider("test-token", "acc-123")
+	provider.client = createOpenAITestClient(server.URL, "test-token", "acc-123")
+
+	resp, err := provider.Chat(t.Context(), []Message{{Role: "user", Content: "Hello"}}, nil, "gpt-5.4", nil)
+	if err != nil {
+		t.Fatalf("Chat() error: %v", err)
+	}
+	if resp.Content != "Recovered from output item" {
+		t.Fatalf("Content = %q, want %q", resp.Content, "Recovered from output item")
+	}
+	if resp.FinishReason != "stop" {
+		t.Fatalf("FinishReason = %q, want stop", resp.FinishReason)
+	}
+}
+
+func TestCodexProvider_ChatRoundTrip_RecoversToolCallFromOutputItemDoneEvent(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/responses" {
+			http.Error(w, "not found: "+r.URL.Path, http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "event: response.output_item.done\n")
+		fmt.Fprint(w, "data: {\"type\":\"response.output_item.done\",\"sequence_number\":1,\"output_index\":0,\"item\":{\"id\":\"fc_1\",\"type\":\"function_call\",\"call_id\":\"call_abc\",\"name\":\"read_file\",\"arguments\":\"{\\\"path\\\":\\\"README.md\\\"}\",\"status\":\"completed\"}}\n\n")
+		fmt.Fprint(w, "event: response.completed\n")
+		fmt.Fprint(w, "data: {\"type\":\"response.completed\",\"sequence_number\":2,\"response\":{\"id\":\"resp_test\",\"object\":\"response\",\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":12,\"output_tokens\":6,\"total_tokens\":18,\"input_tokens_details\":{\"cached_tokens\":0},\"output_tokens_details\":{\"reasoning_tokens\":0}}}}\n\n")
+		fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	provider := NewCodexProvider("test-token", "acc-123")
+	provider.client = createOpenAITestClient(server.URL, "test-token", "acc-123")
+
+	resp, err := provider.Chat(t.Context(), []Message{{Role: "user", Content: "Hello"}}, nil, "gpt-5.4", nil)
+	if err != nil {
+		t.Fatalf("Chat() error: %v", err)
+	}
+	if len(resp.ToolCalls) != 1 {
+		t.Fatalf("len(ToolCalls) = %d, want 1", len(resp.ToolCalls))
+	}
+	if resp.ToolCalls[0].Name != "read_file" {
+		t.Fatalf("ToolCalls[0].Name = %q, want read_file", resp.ToolCalls[0].Name)
+	}
+	if resp.ToolCalls[0].ID != "call_abc" {
+		t.Fatalf("ToolCalls[0].ID = %q, want call_abc", resp.ToolCalls[0].ID)
+	}
+	if resp.ToolCalls[0].Arguments["path"] != "README.md" {
+		t.Fatalf("ToolCalls[0].Arguments[path] = %v, want README.md", resp.ToolCalls[0].Arguments["path"])
+	}
+	if resp.FinishReason != "tool_calls" {
+		t.Fatalf("FinishReason = %q, want tool_calls", resp.FinishReason)
+	}
+}
+
 func TestCodexProvider_ChatRoundTrip_WebSearchDisabled(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/responses" {

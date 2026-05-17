@@ -2,6 +2,7 @@ package oauthprovider
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"github.com/sipeed/picoclaw/pkg/auth"
 	"github.com/sipeed/picoclaw/pkg/logger"
 	orc "github.com/sipeed/picoclaw/pkg/providers/openai_responses_common"
+	"github.com/sipeed/picoclaw/pkg/providers/protocoltypes"
 )
 
 const (
@@ -105,6 +107,9 @@ func (p *CodexProvider) Chat(
 
 	var resp *responses.Response
 	var streamedText strings.Builder
+	var streamedRefusal strings.Builder
+	var streamedReasoning strings.Builder
+	var streamedToolCalls []protocoltypes.ToolCall
 	for stream.Next() {
 		evt := stream.Current()
 		switch evt.Type {
@@ -114,6 +119,22 @@ func (p *CodexProvider) Chat(
 			if streamedText.Len() == 0 {
 				streamedText.WriteString(evt.Text)
 			}
+		case "response.refusal.delta":
+			streamedRefusal.WriteString(evt.Delta)
+		case "response.refusal.done":
+			if streamedRefusal.Len() == 0 {
+				streamedRefusal.WriteString(evt.Refusal)
+			}
+		case "response.reasoning_text.delta", "response.reasoning_summary_text.delta":
+			streamedReasoning.WriteString(evt.Delta)
+		case "response.reasoning_text.done", "response.reasoning_summary_text.done":
+			if streamedReasoning.Len() == 0 {
+				streamedReasoning.WriteString(evt.Text)
+			}
+		case "response.content_part.added", "response.content_part.done":
+			accumulateContentPartEvent(evt, &streamedText, &streamedRefusal, &streamedReasoning)
+		case "response.output_item.done":
+			accumulateOutputItemDone(evt, &streamedText, &streamedRefusal, &streamedToolCalls)
 		case "response.completed", "response.failed", "response.incomplete":
 			evtResp := evt.Response
 			if evtResp.ID != "" {
@@ -162,11 +183,28 @@ func (p *CodexProvider) Chat(
 	}
 
 	parsed := orc.ParseResponseFromStruct(resp)
-	if parsed != nil && strings.TrimSpace(parsed.Content) == "" && streamedText.Len() > 0 {
-		parsed.Content = strings.TrimSpace(streamedText.String())
-		if parsed.FinishReason == "" {
-			parsed.FinishReason = "stop"
+	if parsed == nil {
+		parsed = &protocoltypes.LLMResponse{}
+	}
+	if parsed.Content == "" {
+		switch {
+		case streamedText.Len() > 0:
+			parsed.Content = strings.TrimSpace(streamedText.String())
+		case streamedRefusal.Len() > 0:
+			parsed.Content = strings.TrimSpace(streamedRefusal.String())
 		}
+	}
+	if parsed.ReasoningContent == "" && streamedReasoning.Len() > 0 {
+		parsed.ReasoningContent = strings.TrimSpace(streamedReasoning.String())
+	}
+	if len(parsed.ToolCalls) == 0 && len(streamedToolCalls) > 0 {
+		parsed.ToolCalls = streamedToolCalls
+	}
+	if len(parsed.ToolCalls) > 0 && parsed.FinishReason == "stop" {
+		parsed.FinishReason = "tool_calls"
+	}
+	if parsed.FinishReason == "" && (parsed.Content != "" || parsed.ReasoningContent != "") {
+		parsed.FinishReason = "stop"
 	}
 	return parsed, nil
 }
@@ -253,6 +291,70 @@ func buildCodexParams(
 	}
 
 	return params
+}
+
+func accumulateContentPartEvent(
+	evt responses.ResponseStreamEventUnion,
+	streamedText, streamedRefusal, streamedReasoning *strings.Builder,
+) {
+	part := evt.Part
+	switch part.Type {
+	case "output_text":
+		appendUniqueChunk(streamedText, part.Text)
+	case "refusal":
+		appendUniqueChunk(streamedRefusal, part.Refusal)
+	case "reasoning_text":
+		appendUniqueChunk(streamedReasoning, part.Text)
+	}
+}
+
+func accumulateOutputItemDone(
+	evt responses.ResponseStreamEventUnion,
+	streamedText, streamedRefusal *strings.Builder,
+	streamedToolCalls *[]protocoltypes.ToolCall,
+) {
+	item := evt.Item
+	switch item.Type {
+	case "message":
+		for _, content := range item.Content {
+			switch content.Type {
+			case "output_text":
+				appendUniqueChunk(streamedText, content.Text)
+			case "refusal":
+				appendUniqueChunk(streamedRefusal, content.Refusal)
+			}
+		}
+	case "function_call":
+		var args map[string]any
+		if err := json.Unmarshal([]byte(item.Arguments), &args); err != nil {
+			args = map[string]any{"raw": item.Arguments}
+		}
+		*streamedToolCalls = append(*streamedToolCalls, protocoltypes.ToolCall{
+			ID:   item.CallID,
+			Type: "function",
+			Function: &protocoltypes.FunctionCall{
+				Name:      item.Name,
+				Arguments: item.Arguments,
+			},
+			Name:      item.Name,
+			Arguments: args,
+		})
+	}
+}
+
+func appendUniqueChunk(builder *strings.Builder, chunk string) {
+	if chunk == "" {
+		return
+	}
+	current := builder.String()
+	if current == "" {
+		builder.WriteString(chunk)
+		return
+	}
+	if strings.Contains(current, chunk) {
+		return
+	}
+	builder.WriteString(chunk)
 }
 
 func CreateCodexTokenSource() func() (string, string, error) {
