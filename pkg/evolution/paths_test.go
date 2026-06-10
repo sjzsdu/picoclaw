@@ -3,6 +3,8 @@ package evolution
 import (
 	"path/filepath"
 	"testing"
+
+	pkgroot "github.com/sipeed/picoclaw/pkg"
 )
 
 func TestNewPaths_DefaultRoot(t *testing.T) {
@@ -69,6 +71,19 @@ func TestNewPaths_BlankOverrideFallsBackToDefaultRoot(t *testing.T) {
 	paths := NewPaths(workspace, " \t\n ")
 
 	wantRoot := filepath.Join(workspace, "state", "evolution")
+	if paths.RootDir != wantRoot {
+		t.Fatalf("RootDir = %q, want %q", paths.RootDir, wantRoot)
+	}
+}
+
+func TestNewPaths_UsesStateDirEnvForDefaultRoot(t *testing.T) {
+	workspace := "/tmp/workspace"
+	stateDir := filepath.Join(t.TempDir(), "state")
+	t.Setenv(pkgroot.StateDirEnv, stateDir)
+
+	paths := NewPaths(workspace, "")
+
+	wantRoot := filepath.Join(stateDir, "evolution")
 	if paths.RootDir != wantRoot {
 		t.Fatalf("RootDir = %q, want %q", paths.RootDir, wantRoot)
 	}

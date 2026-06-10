@@ -1,15 +1,24 @@
 import { getDefaultStore } from "jotai"
 import { toast } from "sonner"
 
+import { type SessionHistoryError } from "@/api/sessions"
 import {
   loadSessionMessages,
   mergeHistoryMessages,
 } from "@/features/chat/history"
-import { type PicoMessage, handlePicoMessage } from "@/features/chat/protocol"
+import {
+  CHAT_SESSION_USER_MESSAGE_EVENT,
+  type ChatSessionUserMessageDetail,
+  type PicoMessage,
+  handlePicoMessage,
+  notifySessionActivity,
+  notifySessionUserMessage,
+} from "@/features/chat/protocol"
 import {
   clearStoredSessionId,
   generateSessionId,
   readStoredSessionId,
+  writeStoredSessionId,
 } from "@/features/chat/state"
 import { invalidateSocket, isCurrentSocket } from "@/features/chat/websocket"
 import i18n from "@/i18n"
@@ -21,6 +30,7 @@ import {
 import { type GatewayState, gatewayAtom } from "@/store/gateway"
 
 const store = getDefaultStore()
+const HYDRATE_RETRY_DELAYS_MS = [300, 700, 1500, 2500]
 
 let wsRef: WebSocket | null = null
 let isConnecting = false
@@ -39,6 +49,10 @@ function clearReconnectTimer() {
     window.clearTimeout(reconnectTimer)
     reconnectTimer = null
   }
+}
+
+function persistActiveSessionId(sessionId: string) {
+  writeStoredSessionId(sessionId)
 }
 
 function shouldReconnectFor(generation: number, sessionId: string): boolean {
@@ -80,6 +94,62 @@ function needsActiveSessionHydration(): boolean {
 function setActiveSessionId(sessionId: string) {
   activeSessionIdRef = sessionId
   updateChatStore({ activeSessionId: sessionId })
+}
+
+function isMissingStoredSessionError(
+  error: unknown,
+): error is SessionHistoryError {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "status" in error &&
+    (error as { status?: unknown }).status === 404
+  )
+}
+
+function clearRestoreFailureForStoredSession() {
+  clearStoredSessionId()
+}
+
+async function loadSessionMessagesWithRetry(sessionId: string) {
+  let lastError: unknown
+  for (
+    let attempt = 0;
+    attempt <= HYDRATE_RETRY_DELAYS_MS.length;
+    attempt += 1
+  ) {
+    try {
+      return await loadSessionMessages(sessionId)
+    } catch (error) {
+      lastError = error
+      if (
+        !isMissingStoredSessionError(error) ||
+        attempt >= HYDRATE_RETRY_DELAYS_MS.length
+      ) {
+        throw error
+      }
+      await new Promise((resolve) => {
+        window.setTimeout(resolve, HYDRATE_RETRY_DELAYS_MS[attempt])
+      })
+    }
+  }
+  throw lastError
+}
+
+function handleCrossTabUserMessage(event: Event) {
+  const detail = (event as CustomEvent<ChatSessionUserMessageDetail>).detail
+  if (!detail?.sessionId || detail.sessionId !== activeSessionIdRef) {
+    return
+  }
+
+  updateChatStore((prev) => {
+    if (prev.messages.some((message) => message.id === detail.message.id)) {
+      return prev
+    }
+    return {
+      messages: [...prev.messages, detail.message],
+    }
+  })
 }
 
 function disconnectChatInternal({
@@ -245,6 +315,13 @@ export function disconnectChat() {
   disconnectChatInternal({ clearDesiredConnection: true })
 }
 
+export async function openChatHistory(sessionId: string) {
+  if (sessionId === activeSessionIdRef) {
+    return
+  }
+  switchChatSession(sessionId)
+}
+
 export async function hydrateActiveSession() {
   if (hydratePromise) {
     return hydratePromise
@@ -264,7 +341,7 @@ export async function hydrateActiveSession() {
     return
   }
 
-  hydratePromise = loadSessionMessages(storedSessionId)
+  hydratePromise = loadSessionMessagesWithRetry(storedSessionId)
     .then((historyMessages) => {
       const currentState = getChatState()
       if (currentState.activeSessionId !== storedSessionId) {
@@ -289,7 +366,14 @@ export async function hydrateActiveSession() {
       })
     })
     .catch((error) => {
-      console.error("Failed to restore last session history:", error)
+      if (isMissingStoredSessionError(error)) {
+        console.info(
+          "Stored chat session no longer exists; starting a new session instead.",
+          error.sessionId,
+        )
+      } else {
+        console.error("Failed to restore last session history:", error)
+      }
 
       const currentState = getChatState()
       if (currentState.activeSessionId !== storedSessionId) {
@@ -301,11 +385,14 @@ export async function hydrateActiveSession() {
         return
       }
 
-      clearStoredSessionId()
+      const nextSessionId = generateSessionId()
+      clearRestoreFailureForStoredSession()
+      setActiveSessionId(nextSessionId)
       updateChatStore({
         messages: [],
         isTyping: false,
         hasHydratedActiveSession: true,
+        contextUsage: undefined,
       })
     })
     .finally(() => {
@@ -318,11 +405,15 @@ export async function hydrateActiveSession() {
 interface SendChatMessageInput {
   content: string
   attachments?: ChatAttachment[]
+  agentId?: string
+  modelName?: string
 }
 
 export function sendChatMessage({
   content,
   attachments = [],
+  agentId,
+  modelName,
 }: SendChatMessageInput) {
   if (!wsRef || wsRef.readyState !== WebSocket.OPEN) {
     console.warn("WebSocket not connected")
@@ -341,34 +432,46 @@ export function sendChatMessage({
   const socket = wsRef
   const id = `msg-${++msgIdCounter}-${Date.now()}`
 
+  const userMessage = {
+    id,
+    role: "user" as const,
+    content: normalizedContent,
+    attachments:
+      normalizedAttachments.length > 0 ? normalizedAttachments : undefined,
+    timestamp: Date.now(),
+  }
+
   updateChatStore((prev) => ({
-    messages: [
-      ...prev.messages,
-      {
-        id,
-        role: "user",
-        content: normalizedContent,
-        attachments:
-          normalizedAttachments.length > 0 ? normalizedAttachments : undefined,
-        timestamp: Date.now(),
-      },
-    ],
+    messages: [...prev.messages, userMessage],
     isTyping: true,
   }))
 
   try {
-    const payload: Record<string, unknown> = {
-      content: normalizedContent,
-      media: normalizedAttachments.map((attachment) => attachment.url),
-    }
-
+    persistActiveSessionId(activeSessionIdRef)
     socket.send(
       JSON.stringify({
         type: "message.send",
         id,
-        payload,
+        session_id: activeSessionIdRef,
+        payload: {
+          content: normalizedContent,
+          ...(agentId ? { agent_id: agentId } : {}),
+          ...(modelName ? { model_name: modelName } : {}),
+          media: normalizedAttachments.map((attachment) => attachment.url),
+        },
       }),
     )
+    notifySessionActivity({
+      sessionId: activeSessionIdRef,
+      preview:
+        normalizedContent ||
+        (normalizedAttachments.length > 0 ? "[image]" : ""),
+      timestamp: new Date().toISOString(),
+    })
+    notifySessionUserMessage({
+      sessionId: activeSessionIdRef,
+      message: userMessage,
+    })
     return true
   } catch (error) {
     console.error("Failed to send pico message:", error)
@@ -386,10 +489,11 @@ export async function switchChatSession(sessionId: string) {
   }
 
   try {
-    const historyMessages = await loadSessionMessages(sessionId)
+    const historyMessages = await loadSessionMessagesWithRetry(sessionId)
 
     disconnectChatInternal({ clearDesiredConnection: false })
     setActiveSessionId(sessionId)
+    persistActiveSessionId(sessionId)
     updateChatStore({
       messages: historyMessages,
       isTyping: false,
@@ -458,6 +562,10 @@ export function initializeChatStore() {
   }
 
   unsubscribeGateway = store.sub(gatewayAtom, syncConnectionWithGateway)
+  window.addEventListener(
+    CHAT_SESSION_USER_MESSAGE_EVENT,
+    handleCrossTabUserMessage as EventListener,
+  )
 
   if (!readStoredSessionId()) {
     updateChatStore({ hasHydratedActiveSession: true })
@@ -474,6 +582,10 @@ export function initializeChatStore() {
 }
 
 export function teardownChatStore() {
+  window.removeEventListener(
+    CHAT_SESSION_USER_MESSAGE_EVENT,
+    handleCrossTabUserMessage as EventListener,
+  )
   unsubscribeGateway?.()
   unsubscribeGateway = null
   initialized = false

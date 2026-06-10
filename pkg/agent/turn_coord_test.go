@@ -149,6 +149,26 @@ func (p *toolCallRespProvider) GetDefaultModel() string {
 	return "tool-model"
 }
 
+type reasoningOnlyProvider struct{}
+
+func (p *reasoningOnlyProvider) Chat(
+	ctx context.Context,
+	messages []providers.Message,
+	tools []providers.ToolDefinition,
+	model string,
+	opts map[string]any,
+) (*providers.LLMResponse, error) {
+	return &providers.LLMResponse{
+		Content:          "",
+		ReasoningContent: "I'll review the dependency manifests...",
+		FinishReason:     "stop",
+	}, nil
+}
+
+func (p *reasoningOnlyProvider) GetDefaultModel() string {
+	return "reasoning-only-model"
+}
+
 // errorProvider simulates various error conditions
 type errorProvider struct {
 	errType   string
@@ -341,6 +361,7 @@ func TestPipeline_CallLLM_SimpleResponse(t *testing.T) {
 	}
 }
 
+<<<<<<< HEAD
 func TestPipeline_SetupTurn_ModelNameDoesNotUseFallbackAliasBeforeFallback(t *testing.T) {
 	al, agent, cleanup := newTurnCoordTestLoop(t, &simpleConvProvider{})
 	defer cleanup()
@@ -387,6 +408,12 @@ func TestPipeline_CallLLM_UsesSuccessfulFallbackIdentityAlias(t *testing.T) {
 	}
 	al.fallback = providers.NewFallbackChain(providers.NewCooldownTracker(), nil)
 
+=======
+func TestPipeline_CallLLM_DoesNotPromoteReasoningContentToFinalResponse(t *testing.T) {
+	al, agent, cleanup := newTurnCoordTestLoop(t, &reasoningOnlyProvider{})
+	defer cleanup()
+
+>>>>>>> 651babc0 (feat: optimize the chat and web)
 	pipeline := NewPipeline(al)
 	ts := newTurnState(agent, makeTestProcessOpts("test-session"), turnEventScope{
 		turnID:  "turn-1",
@@ -405,6 +432,7 @@ func TestPipeline_CallLLM_UsesSuccessfulFallbackIdentityAlias(t *testing.T) {
 	if ctrl != ControlBreak {
 		t.Fatalf("expected ControlBreak, got %v", ctrl)
 	}
+<<<<<<< HEAD
 	if exec.llmModelName != "secondary" {
 		t.Fatalf("exec.llmModelName = %q, want %q", exec.llmModelName, "secondary")
 	}
@@ -484,6 +512,16 @@ func TestPipeline_SetupTurn_UsesLightCandidateDisplayName(t *testing.T) {
 	}
 	if exec.llmModelName != "light-model" {
 		t.Fatalf("exec.llmModelName = %q, want %q", exec.llmModelName, "light-model")
+=======
+	if exec.response == nil {
+		t.Fatal("expected non-nil response")
+	}
+	if exec.response.ReasoningContent == "" {
+		t.Fatal("expected reasoning content in raw response")
+	}
+	if exec.finalContent != "" {
+		t.Fatalf("expected empty finalContent, got %q", exec.finalContent)
+>>>>>>> 651babc0 (feat: optimize the chat and web)
 	}
 }
 
@@ -522,6 +560,19 @@ func TestRunTurn_FinalizeSaveErrorEmitsErrorTurnEnd(t *testing.T) {
 		case <-deadline:
 			t.Fatal("timed out waiting for turn_end event")
 		}
+	}
+}
+
+func TestRunTurn_ReasoningOnlyResponseUsesDefaultEmptyResponseFallback(t *testing.T) {
+	al, _, cleanup := newTurnCoordTestLoop(t, &reasoningOnlyProvider{})
+	defer cleanup()
+
+	resp, err := al.ProcessDirect(context.Background(), "hello", "reasoning-only-session")
+	if err != nil {
+		t.Fatalf("ProcessDirect failed: %v", err)
+	}
+	if resp != defaultResponse {
+		t.Fatalf("ProcessDirect response = %q, want %q", resp, defaultResponse)
 	}
 }
 

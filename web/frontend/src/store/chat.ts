@@ -8,10 +8,7 @@ import {
   assistantDetailVisibilityStorage,
   shouldShowAssistantMessage,
 } from "@/features/chat/detail-visibility"
-import {
-  getInitialActiveSessionId,
-  writeStoredSessionId,
-} from "@/features/chat/state"
+import { getInitialActiveSessionId } from "@/features/chat/state"
 
 export interface ChatAttachment {
   type: "image" | "audio" | "video" | "file"
@@ -38,15 +35,21 @@ export interface ChatToolCall {
 
 export type AssistantMessageKind = "normal" | "thought" | "tool_calls"
 
+export type MessageDeliveryStatus = "sending" | "sent" | "delivered" | "failed"
+
 export interface ChatMessage {
   id: string
   role: "user" | "assistant"
   content: string
   timestamp: number | string
+  reasoningContent?: string
   kind?: AssistantMessageKind
   modelName?: string
   attachments?: ChatAttachment[]
   toolCalls?: ChatToolCall[]
+  agentId?: string
+  deliveryStatus?: MessageDeliveryStatus
+  isStreaming?: boolean
 }
 
 export interface ContextUsage {
@@ -106,13 +109,7 @@ export function updateChatStore(
 ) {
   store.set(chatAtom, (prev) => {
     const nextPatch = typeof patch === "function" ? patch(prev) : patch
-    const next = { ...prev, ...nextPatch }
-
-    if (next.activeSessionId !== prev.activeSessionId) {
-      writeStoredSessionId(next.activeSessionId)
-    }
-
-    return next
+    return { ...prev, ...nextPatch }
   })
 }
 

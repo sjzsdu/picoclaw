@@ -187,7 +187,7 @@ func TestShutdownGatewayClosesMessageBus(t *testing.T) {
 		_ = sub.Close()
 	}()
 
-	shutdownGateway(&services{}, al, &startupBlockedProvider{reason: "not used"}, msgBus, true)
+	shutdownGateway(&services{agentLoop: al}, &startupBlockedProvider{reason: "not used"}, msgBus, true)
 
 	evt := receiveGatewayRuntimeEvent(t, eventsCh)
 	if evt.Kind != runtimeevents.KindBusCloseCompleted {

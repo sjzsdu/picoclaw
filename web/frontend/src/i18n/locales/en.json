@@ -5,6 +5,7 @@
     "models": "Models",
     "credentials": "Credentials",
     "agent_group": "Agent",
+    "agents": "Agents",
     "hub": "Hub",
     "skills": "Skills",
     "tools": "Tools",
@@ -85,6 +86,9 @@
     "historyLoadFailed": "Failed to load chat history",
     "historyOpenFailed": "Failed to open this chat history",
     "loadingMore": "Loading more...",
+    "renameSession": "Rename session",
+    "renameSessionDesc": "Enter a new name for this chat",
+    "sessionTitlePlaceholder": "Enter session title",
     "deleteSession": "Delete session",
     "messagesCount": "{{count}} messages",
     "noModel": "Select model",
@@ -250,8 +254,14 @@
     },
     "action": {
       "edit": "Edit API key",
+      "test": "Test",
+      "testAll": "Test Group",
       "setDefault": "Set as default",
       "delete": "Delete model",
+      "testDisabled": {
+        "isVirtual": "Virtual models cannot be tested directly",
+        "testingAll": "This provider group is being tested"
+      },
       "setDefaultDisabled": {
         "setting": "Setting as default...",
         "unavailable": "Cannot set unavailable model as default",
@@ -386,7 +396,12 @@
       "failed": "Connection failed",
       "status": "Status: {{status}}",
       "testFailed": "Test failed",
-      "testAgain": "Test Again"
+      "testAgain": "Test Again",
+      "lastResultPrefix": "Last test: ",
+      "persisted": {
+        "ok": "Passed",
+        "error": "Failed"
+      }
     },
     "validation": {
       "whitespace": "Model identifier cannot contain whitespace",
@@ -592,6 +607,75 @@
   "pages": {
     "agent": {
       "load_error": "Failed to load agent support information.",
+      "manage": {
+        "pageDescription": "Create, update, and review launcher agents from one management view.",
+        "loadError": "Failed to load agents",
+        "inherit": "Inherit from defaults",
+        "editDescription": "Update the selected agent basic settings. Agent IDs and names stay immutable here to keep session history and navigation stable.",
+        "saveSuccess": "Agent saved",
+        "saveError": "Failed to save agent",
+        "add": {
+          "button": "Add Agent",
+          "title": "New agent"
+        },
+        "actions": {
+          "edit": "Edit",
+          "delete": "Delete"
+        },
+        "badge": {
+          "main": "Main",
+          "default": "Default"
+        },
+        "form": {
+          "id": "Agent ID",
+          "idHint": "Lowercase letters, numbers, underscores, and dashes only.",
+          "idLocked": "IDs are locked after creation to keep session history and workspaces stable.",
+          "name": "Display name",
+          "nameHint": "Shown in chat selectors and the launcher sidebar.",
+          "namePlaceholder": "e.g. Assistant",
+          "basicInfo": "Basic Information",
+          "advancedSettings": "Advanced Settings",
+          "model": "Primary model",
+          "modelHint": "Leave blank to inherit the global agent default model.",
+          "workspace": "Workspace override",
+          "workspaceHint": "Optional. Leave blank to use the effective default workspace.",
+          "skills": "Skills",
+          "skillsHint": "Optional. Enter one skill per line or comma separated."
+        },
+        "meta": {
+          "effectiveModel": "Effective model",
+          "effectiveWorkspace": "Effective workspace",
+          "skillCount": "Skills"
+        },
+        "delete": {
+          "title": "Delete agent?",
+          "description": "\"{{name}}\" will be removed from the launcher configuration.",
+          "blocked": "This agent cannot be deleted right now.",
+          "confirm": "Delete",
+          "success": "Agent deleted"
+        },
+        "workspaceFiles": {
+          "button": "Files",
+          "title": "Workspace Files",
+          "files": "Files",
+          "selectFile": "Select a file to edit",
+          "searchPlaceholder": "Search file paths...",
+          "placeholder": "Enter file content...",
+          "empty": "No editable workspace files found.",
+          "noMatches": "No files match your search.",
+          "fileCount_one": "{{count}} file",
+          "fileCount_other": "{{count}} files",
+          "editable": "Editable",
+          "readOnly": "Read-only",
+          "unsaved": "Unsaved",
+          "editHint": "Edit the file here and save it back into the workspace.",
+          "readOnlyHint": "This file is currently read-only, so it can only be viewed.",
+          "characterCount_one": "{{count}} character",
+          "characterCount_other": "{{count}} characters",
+          "saveSuccess": "File saved",
+          "saveError": "Failed to save file"
+        }
+      },
       "skills": {
         "empty": "No skills are currently available.",
         "install_success": "Installed {{name}}.",

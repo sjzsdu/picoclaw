@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"time"
 
 	"github.com/sipeed/picoclaw/pkg/logger"
@@ -31,7 +32,7 @@ func newSeahorseContextManager(_ json.RawMessage, al *AgentLoop) (ContextManager
 	// Resolve workspace for DB path
 	// DB stores session data, so it goes in sessions/ directory
 	agent := al.registry.GetDefaultAgent()
-	dbPath := agent.Workspace + "/sessions/seahorse.db"
+	dbPath := filepath.Join(resolveSessionStoreDir(agent.Workspace), "seahorse.db")
 
 	// Create CompleteFn from provider
 	completeFn := providerToCompleteFn(agent.Provider, agent.Model)

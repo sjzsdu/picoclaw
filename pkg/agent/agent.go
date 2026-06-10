@@ -44,9 +44,10 @@ type AgentLoop struct {
 	runtimeEventLogMu  sync.RWMutex
 	runtimeEventLogger *runtimeEventLogger
 	runtimeEventLogSub runtimeevents.Subscription
-	hooks              *HookManager
 
-	// Runtime state
+	workerID int
+	hooks    *HookManager
+
 	running        atomic.Bool
 	contextManager ContextManager
 	fallback       *providers.FallbackChain
@@ -99,7 +100,8 @@ type processOptions struct {
 	SendResponse            bool                   // Whether to send response via bus
 	AllowInterimPicoPublish bool                   // Whether pico tool-call interim text can be published when SendResponse is false
 	SuppressToolFeedback    bool                   // Whether to suppress inline tool feedback messages
-	NoHistory               bool                   // If true, don't load session history (for heartbeat)
+	NoHistory               bool                   // If true, don't load prior session history into the LLM context
+	SkipSessionPersistence  bool                   // If true, don't write this turn into session storage
 	SkipInitialSteeringPoll bool                   // If true, skip the steering poll at loop start (used by Continue)
 	InboundContext          *bus.InboundContext    // Normalized inbound facts for events/hooks
 	RouteResult             *routing.ResolvedRoute // Route decision snapshot for events/hooks
@@ -133,9 +135,29 @@ const (
 	metadataKeyParentPeerID    = "parent_peer_id"
 )
 
+// SetWorkerID sets the worker ID for this AgentLoop.
+// Used by WorkerPool to identify workers.
+func (al *AgentLoop) SetWorkerID(id int) {
+	al.workerID = id
+}
+
+// GetWorkerID returns the worker ID.
+// Returns -1 if not part of a worker pool.
+func (al *AgentLoop) GetWorkerID() int {
+	return al.workerID
+}
+
 // registerSharedTools registers tools that are shared across all agents (web, message, spawn).
 
 func (al *AgentLoop) Run(ctx context.Context) error {
+	return al.run(ctx, al.bus.InboundChan())
+}
+
+func (al *AgentLoop) RunInbox(ctx context.Context, inbox <-chan bus.InboundMessage) error {
+	return al.run(ctx, inbox)
+}
+
+func (al *AgentLoop) run(ctx context.Context, inbox <-chan bus.InboundMessage) error {
 	al.running.Store(true)
 
 	if err := al.ensureHooksInitialized(ctx); err != nil {
@@ -156,7 +178,7 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 			if !al.running.Load() {
 				return nil
 			}
-		case msg, ok := <-al.bus.InboundChan():
+		case msg, ok := <-inbox:
 			if !ok {
 				return nil
 			}
@@ -358,6 +380,15 @@ func (al *AgentLoop) ReloadProviderAndConfig(
 	provider providers.LLMProvider,
 	cfg *config.Config,
 ) error {
+	return al.reloadProviderAndConfig(ctx, provider, cfg, true)
+}
+
+func (al *AgentLoop) reloadProviderAndConfig(
+	ctx context.Context,
+	provider providers.LLMProvider,
+	cfg *config.Config,
+	closeOldProvider bool,
+) error {
 	// Validate inputs
 	if provider == nil {
 		return fmt.Errorf("provider cannot be nil")
@@ -470,18 +501,20 @@ func (al *AgentLoop) ReloadProviderAndConfig(
 
 	// Close old provider after releasing the lock
 	// This prevents blocking readers while closing
-	if oldProvider, ok := extractProvider(oldRegistry); ok {
-		if stateful, ok := oldProvider.(providers.StatefulProvider); ok {
-			// Give in-flight requests a moment to complete
-			// Use a reasonable timeout that balances cleanup vs resource usage
-			select {
-			case <-time.After(100 * time.Millisecond):
-				stateful.Close()
-			case <-ctx.Done():
-				// Context canceled, close immediately but log warning
-				logger.WarnCF("agent", "Context canceled during provider cleanup, forcing close",
-					map[string]any{"error": ctx.Err()})
-				stateful.Close()
+	if closeOldProvider {
+		if oldProvider, ok := extractProvider(oldRegistry); ok {
+			if stateful, ok := oldProvider.(providers.StatefulProvider); ok {
+				// Give in-flight requests a moment to complete
+				// Use a reasonable timeout that balances cleanup vs resource usage
+				select {
+				case <-time.After(100 * time.Millisecond):
+					stateful.Close()
+				case <-ctx.Done():
+					// Context canceled, close immediately but log warning
+					logger.WarnCF("agent", "Context canceled during provider cleanup, forcing close",
+						map[string]any{"error": ctx.Err()})
+					stateful.Close()
+				}
 			}
 		}
 	}

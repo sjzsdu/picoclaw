@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 
+	pkgroot "github.com/sipeed/picoclaw/pkg"
 	"github.com/sipeed/picoclaw/pkg/config"
 	"github.com/sipeed/picoclaw/pkg/isolation"
 	"github.com/sipeed/picoclaw/pkg/logger"
@@ -43,6 +44,7 @@ type AgentInstance struct {
 	Subagents                 *config.SubagentsConfig
 	SkillsFilter              []string
 	MCPServerAllowlist        map[string]struct{}
+	NoHistory                 bool
 	Candidates                []providers.FallbackCandidate
 
 	// Router is non-nil when model routing is configured and the light model
@@ -126,7 +128,7 @@ func NewAgentInstance(
 		toolsRegistry.Register(tools.NewAppendFileTool(workspace, restrict, allowWritePaths))
 	}
 
-	sessionsDir := filepath.Join(workspace, "sessions")
+	sessionsDir := resolveSessionStoreDir(workspace)
 	sessions := initSessionStore(sessionsDir)
 
 	mcpDiscoveryActive := agentHasDiscoverableMCPServers(cfg, agentMCPServerAllowlist)
@@ -141,6 +143,7 @@ func NewAgentInstance(
 	agentName := ""
 	var subagents *config.SubagentsConfig
 	var skillsFilter []string
+	var noHistory bool
 
 	if agentCfg != nil {
 		agentID = routing.NormalizeAgentID(agentCfg.ID)
@@ -150,6 +153,7 @@ func NewAgentInstance(
 		}
 		subagents = agentCfg.Subagents
 		skillsFilter = resolveAgentSkillsFilter(agentCfg, definition)
+		noHistory = agentCfg.NoHistory
 	}
 	provider = resolvePrimaryProviderForAgent(cfg, workspace, agentID, model, provider)
 	warnOnUnknownAgentMCPServerDeclarations(agentID, workspace, cfg, definition)
@@ -265,6 +269,7 @@ func NewAgentInstance(
 		Subagents:                 subagents,
 		SkillsFilter:              skillsFilter,
 		MCPServerAllowlist:        agentMCPServerAllowlist,
+		NoHistory:                 noHistory,
 		Candidates:                candidates,
 		Router:                    router,
 		LightCandidates:           lightCandidates,
@@ -477,6 +482,13 @@ func initSessionStore(dir string) session.SessionStore {
 	}
 
 	return session.NewJSONLBackend(store)
+}
+
+func resolveSessionStoreDir(workspace string) string {
+	if envDir := strings.TrimSpace(os.Getenv(pkgroot.SessionsDirEnv)); envDir != "" {
+		return expandHome(envDir)
+	}
+	return filepath.Join(workspace, "sessions")
 }
 
 func expandHome(path string) string {

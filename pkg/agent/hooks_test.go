@@ -462,7 +462,6 @@ func TestAgentLoop_Hooks_ObserverAndLLMInterceptor(t *testing.T) {
 		},
 		SessionScope: &session.SessionScope{
 			Version:    session.ScopeVersionV1,
-			AgentID:    "main",
 			Channel:    "cli",
 			Account:    routing.DefaultAccountID,
 			Dimensions: []string{"sender"},
@@ -602,7 +601,6 @@ func TestAgentLoop_BtwCommand_UsesLLMHooks(t *testing.T) {
 			},
 			SessionScope: &session.SessionScope{
 				Version:    session.ScopeVersionV1,
-				AgentID:    "main",
 				Channel:    "cli",
 				Account:    routing.DefaultAccountID,
 				Dimensions: []string{"sender"},
@@ -1269,7 +1267,6 @@ func TestAgentLoop_HookRespond_ResponseHandledMediaPreservesOutboundContext(t *t
 			SessionKey: "session-topic-media",
 			SessionScope: &session.SessionScope{
 				Version:    session.ScopeVersionV1,
-				AgentID:    agent.ID,
 				Channel:    "telegram",
 				Dimensions: []string{"chat"},
 				Values: map[string]string{
