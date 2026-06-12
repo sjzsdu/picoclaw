@@ -4558,6 +4558,71 @@ func (p *unexpectedTextAttachmentProvider) GetDefaultModel() string {
 	return "unexpected-text-attachment-model"
 }
 
+type loadImageThenTextFollowUpProvider struct {
+	path             string
+	calls            int
+	models           []string
+	mediaSeen        []bool
+	syntheticMsgSeen []bool
+}
+
+func (p *loadImageThenTextFollowUpProvider) Chat(
+	ctx context.Context,
+	messages []providers.Message,
+	tools []providers.ToolDefinition,
+	model string,
+	opts map[string]any,
+) (*providers.LLMResponse, error) {
+	p.calls++
+	p.models = append(p.models, model)
+
+	hasMedia := false
+	hasSynthetic := false
+	for _, msg := range messages {
+		if msg.Content == "[Loaded image from tool result above]" {
+			hasSynthetic = true
+		}
+		for _, ref := range msg.Media {
+			if strings.TrimSpace(ref) != "" {
+				hasMedia = true
+				break
+			}
+		}
+	}
+	p.mediaSeen = append(p.mediaSeen, hasMedia)
+	p.syntheticMsgSeen = append(p.syntheticMsgSeen, hasSynthetic)
+
+	switch p.calls {
+	case 1:
+		return &providers.LLMResponse{
+			Content: "Let me inspect the image.",
+			ToolCalls: []providers.ToolCall{{
+				ID:        "call_load_image_regression",
+				Type:      "function",
+				Name:      "load_image",
+				Arguments: map[string]any{"path": p.path},
+			}},
+		}, nil
+	case 2:
+		if hasMedia {
+			return nil, fmt.Errorf("text-only follow-up unexpectedly retained media from prior turn")
+		}
+		if hasSynthetic {
+			return nil, fmt.Errorf("text-only follow-up unexpectedly rebuilt synthetic tool image message from history")
+		}
+		return &providers.LLMResponse{
+			Content:   "text follow-up",
+			ToolCalls: []providers.ToolCall{},
+		}, nil
+	default:
+		return nil, fmt.Errorf("unexpected extra text-model call %d", p.calls)
+	}
+}
+
+func (p *loadImageThenTextFollowUpProvider) GetDefaultModel() string {
+	return "load-image-then-text-follow-up-model"
+}
+
 func TestAgentLoop_VisionUnsupportedErrorReturnsClearFailure(t *testing.T) {
 	workspace := t.TempDir()
 
@@ -4708,6 +4773,113 @@ func TestAgentLoop_UserAttachmentRoutesToImageModelAfterMediaResolution(t *testi
 	}
 	if !slices.Equal(visionProvider.mediaSeen, []bool{false}) {
 		t.Fatalf("visionProvider mediaSeen = %v, want %v", visionProvider.mediaSeen, []bool{false})
+	}
+}
+
+func TestAgentLoop_TextFollowUpAfterLoadImageStaysOnTextModel(t *testing.T) {
+	workspace := t.TempDir()
+	pngPath := filepath.Join(workspace, "sample.png")
+	pngBytes := []byte{
+		0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
+		0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
+		0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x02,
+		0x00, 0x00, 0x00, 0x90, 0x77, 0x53, 0xDE,
+	}
+	if err := os.WriteFile(pngPath, pngBytes, 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         workspace,
+				ModelName:         "text-model",
+				ImageModel:        "vision-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 3,
+			},
+		},
+		Tools: config.ToolsConfig{
+			LoadImage: config.ToolConfig{Enabled: true},
+		},
+		ModelList: []*config.ModelConfig{
+			{ModelName: "text-model", Model: "openai/text-model"},
+			{ModelName: "vision-model", Model: "openai/vision-model"},
+		},
+	}
+
+	msgBus := bus.NewMessageBus()
+	textProvider := &loadImageThenTextFollowUpProvider{path: pngPath}
+	al := NewAgentLoop(cfg, msgBus, textProvider)
+	al.SetMediaStore(media.NewFileMediaStore())
+
+	agent := al.registry.GetDefaultAgent()
+	if agent == nil {
+		t.Fatal("expected default agent")
+	}
+	if len(agent.ImageCandidates) != 1 {
+		t.Fatalf("len(ImageCandidates) = %d, want 1", len(agent.ImageCandidates))
+	}
+
+	visionProvider := &visionAnswerProvider{}
+	agent.CandidateProviders[providers.ModelKey("openai", "vision-model")] = visionProvider
+
+	sessionKey := "agent:main:telegram:direct:user1"
+	timeoutCtx, cancel := context.WithTimeout(context.Background(), responseTimeout)
+	defer cancel()
+
+	resp1, err := al.processMessage(timeoutCtx, testInboundMessage(bus.InboundMessage{
+		Context: bus.InboundContext{
+			Channel:   "telegram",
+			ChatID:    "chat1",
+			ChatType:  "direct",
+			SenderID:  "user1",
+			MessageID: "m1",
+		},
+		Content:    "describe the image you load",
+		SessionKey: sessionKey,
+	}))
+	if err != nil {
+		t.Fatalf("first processMessage() error = %v", err)
+	}
+	if resp1 != "vision answer" {
+		t.Fatalf("first response = %q, want %q", resp1, "vision answer")
+	}
+
+	timeoutCtx2, cancel2 := context.WithTimeout(context.Background(), responseTimeout)
+	defer cancel2()
+
+	resp2, err := al.processMessage(timeoutCtx2, testInboundMessage(bus.InboundMessage{
+		Context: bus.InboundContext{
+			Channel:   "telegram",
+			ChatID:    "chat1",
+			ChatType:  "direct",
+			SenderID:  "user1",
+			MessageID: "m2",
+		},
+		Content:    "now summarize it in one sentence",
+		SessionKey: sessionKey,
+	}))
+	if err != nil {
+		t.Fatalf("second processMessage() error = %v", err)
+	}
+	if resp2 != "text follow-up" {
+		t.Fatalf("second response = %q, want %q", resp2, "text follow-up")
+	}
+	if textProvider.calls != 2 {
+		t.Fatalf("textProvider calls = %d, want %d", textProvider.calls, 2)
+	}
+	if !slices.Equal(textProvider.models, []string{"text-model", "text-model"}) {
+		t.Fatalf("textProvider models = %v, want %v", textProvider.models, []string{"text-model", "text-model"})
+	}
+	if !slices.Equal(textProvider.mediaSeen, []bool{false, false}) {
+		t.Fatalf("textProvider mediaSeen = %v, want %v", textProvider.mediaSeen, []bool{false, false})
+	}
+	if !slices.Equal(textProvider.syntheticMsgSeen, []bool{false, false}) {
+		t.Fatalf("textProvider syntheticMsgSeen = %v, want %v", textProvider.syntheticMsgSeen, []bool{false, false})
+	}
+	if visionProvider.calls != 1 {
+		t.Fatalf("visionProvider calls = %d, want %d", visionProvider.calls, 1)
 	}
 }
 
@@ -6123,7 +6295,7 @@ func TestResolveMediaRefs_ToolRoleImageAppendedAsUserMessage(t *testing.T) {
 	ref, _ := store.Store(pngPath, media.MediaMeta{}, "test")
 
 	messages := []providers.Message{
-		{Role: "tool", Content: "Image loaded", Media: []string{ref}},
+		toolResultPromptMessage("Image loaded", "call_tool_result_image", []string{ref}),
 	}
 	result := resolveMediaRefs(messages, store, config.DefaultMaxMediaSize)
 
@@ -6151,6 +6323,41 @@ func TestResolveMediaRefs_ToolRoleImageAppendedAsUserMessage(t *testing.T) {
 	}
 }
 
+func TestResolveMediaRefs_HistoricalToolRoleImageDoesNotAppendAsUserMessage(t *testing.T) {
+	store := media.NewFileMediaStore()
+	dir := t.TempDir()
+
+	pngPath := filepath.Join(dir, "historical-tool-result.png")
+	pngHeader := []byte{
+		0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
+		0x00, 0x00, 0x00, 0x0D,
+		0x49, 0x48, 0x44, 0x52,
+		0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x02,
+		0x00, 0x00, 0x00,
+		0x90, 0x77, 0x53, 0xDE,
+	}
+	if err := os.WriteFile(pngPath, pngHeader, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ref, _ := store.Store(pngPath, media.MediaMeta{}, "test")
+
+	messages := []providers.Message{
+		{Role: "tool", Content: "Image loaded", Media: []string{ref}},
+	}
+	result := resolveMediaRefs(messages, store, config.DefaultMaxMediaSize)
+
+	if len(result) != 1 {
+		t.Fatalf("expected only historical tool message to remain, got %d messages", len(result))
+	}
+	if len(result[0].Media) != 0 {
+		t.Fatalf("expected 0 media in historical tool message, got %d", len(result[0].Media))
+	}
+	localPath, _, _ := store.ResolveWithMeta(ref)
+	if !strings.Contains(result[0].Content, "[image:"+localPath+"]") {
+		t.Fatalf("expected image path tag in historical tool content, got %q", result[0].Content)
+	}
+}
+
 func TestResolveMediaRefs_MultiToolCallPreservesOrdering(t *testing.T) {
 	store := media.NewFileMediaStore()
 	dir := t.TempDir()
@@ -6169,8 +6376,8 @@ func TestResolveMediaRefs_MultiToolCallPreservesOrdering(t *testing.T) {
 	// Simulate: assistant called load_image + read_file, two tool results follow
 	messages := []providers.Message{
 		{Role: "assistant", Content: "Let me load the image and read the file."},
-		{Role: "tool", Content: "Image loaded [image: photo]", Media: []string{imgRef}},
-		{Role: "tool", Content: "file contents here"},
+		toolResultPromptMessage("Image loaded [image: photo]", "call_load_image_multi_tool", []string{imgRef}),
+		toolResultPromptMessage("file contents here", "call_read_file_multi_tool", nil),
 	}
 	result := resolveMediaRefs(messages, store, config.DefaultMaxMediaSize)
 

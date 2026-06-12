@@ -52,22 +52,14 @@ func resolveMediaRefs(messages []providers.Message, store media.MediaStore, maxS
 		// When leaving a tool-message block, flush any accumulated images
 		// as a synthetic user message.
 		if m.Role != "tool" && len(pendingToolImages) > 0 {
-			result = append(result, providers.Message{
-				Role:    "user",
-				Content: "[Loaded image from tool result above]",
-				Media:   pendingToolImages,
-			})
+			result = append(result, toolImageFollowUpPromptMessage(pendingToolImages))
 			pendingToolImages = nil
 		}
 
 		if len(m.Media) == 0 {
 			result = append(result, m)
 			if idx == len(messages)-1 && len(pendingToolImages) > 0 {
-				result = append(result, providers.Message{
-					Role:    "user",
-					Content: "[Loaded image from tool result above]",
-					Media:   pendingToolImages,
-				})
+				result = append(result, toolImageFollowUpPromptMessage(pendingToolImages))
 				pendingToolImages = nil
 			}
 			continue
@@ -104,7 +96,7 @@ func resolveMediaRefs(messages []providers.Message, store media.MediaStore, maxS
 			mime := detectMIME(localPath, meta)
 			pathTags = append(pathTags, buildPathTag(mime, localPath))
 
-			if m.Role == "tool" && strings.HasPrefix(mime, "image/") {
+			if m.Role == "tool" && isTurnPromptMessage(m) && strings.HasPrefix(mime, "image/") {
 				dataURL := encodeImageToDataURL(localPath, mime, info, maxSize)
 				if dataURL != "" {
 					pendingToolImages = append(pendingToolImages, dataURL)
@@ -120,11 +112,7 @@ func resolveMediaRefs(messages []providers.Message, store media.MediaStore, maxS
 
 		// If this is the last message and we have pending images, flush them.
 		if idx == len(messages)-1 && len(pendingToolImages) > 0 {
-			result = append(result, providers.Message{
-				Role:    "user",
-				Content: "[Loaded image from tool result above]",
-				Media:   pendingToolImages,
-			})
+			result = append(result, toolImageFollowUpPromptMessage(pendingToolImages))
 			pendingToolImages = nil
 		}
 	}
