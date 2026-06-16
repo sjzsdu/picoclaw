@@ -16,6 +16,7 @@ import {
 export const CHAT_SESSION_ACTIVITY_EVENT = "picoclaw:chat-session-activity"
 export const CHAT_SESSION_USER_MESSAGE_EVENT =
   "picoclaw:chat-session-user-message"
+export const CHAT_SESSION_TITLE_EVENT = "picoclaw:chat-session-title"
 const CHAT_CROSS_TAB_CHANNEL = "picoclaw:chat-cross-tab"
 const CHAT_TAB_ID = `${Date.now()}-${Math.random().toString(36).slice(2)}`
 
@@ -30,6 +31,11 @@ type CrossTabMessage =
       type: typeof CHAT_SESSION_USER_MESSAGE_EVENT
       detail: ChatSessionUserMessageDetail
     }
+  | {
+      source: string
+      type: typeof CHAT_SESSION_TITLE_EVENT
+      detail: ChatSessionTitleDetail
+    }
 
 export interface ChatSessionActivityDetail {
   sessionId: string
@@ -40,6 +46,11 @@ export interface ChatSessionActivityDetail {
 export interface ChatSessionUserMessageDetail {
   sessionId: string
   message: ChatMessage
+}
+
+export interface ChatSessionTitleDetail {
+  sessionId: string
+  title: string
 }
 
 const crossTabChannel =
@@ -80,6 +91,14 @@ export function notifySessionUserMessage(detail: ChatSessionUserMessageDetail) {
   }
   dispatchChatEvent(CHAT_SESSION_USER_MESSAGE_EVENT, detail)
   broadcastChatEvent({ type: CHAT_SESSION_USER_MESSAGE_EVENT, detail })
+}
+
+export function notifySessionTitle(detail: ChatSessionTitleDetail) {
+  if (!detail.sessionId) {
+    return
+  }
+  dispatchChatEvent(CHAT_SESSION_TITLE_EVENT, detail)
+  broadcastChatEvent({ type: CHAT_SESSION_TITLE_EVENT, detail })
 }
 
 export interface PicoMessage {
@@ -248,17 +267,16 @@ export function handlePicoMessage(
 
       updateChatStore((prev) => ({
         messages: (() => {
-          const lastMessage = prev.messages.at(-1)
-          if (
-            lastMessage &&
-            assistantMessageMatchesIncoming(lastMessage, {
+          const alreadyExists = prev.messages.some((msg) =>
+            assistantMessageMatchesIncoming(msg, {
               content,
               kind,
               agentId,
               modelName,
               toolCalls,
-            })
-          ) {
+            }),
+          )
+          if (alreadyExists) {
             return prev.messages
           }
 
@@ -323,7 +341,6 @@ export function handlePicoMessage(
               content,
               ...(hasKind ? { kind } : {}),
               ...(toolCalls !== undefined ? { toolCalls } : {}),
-              ...(toolCalls === undefined ? { toolCalls: undefined } : {}),
               agentId:
                 typeof payload.agent_id === "string"
                   ? payload.agent_id
@@ -351,7 +368,6 @@ export function handlePicoMessage(
                     content,
                     ...(hasKind ? { kind } : {}),
                     ...(toolCalls !== undefined ? { toolCalls } : {}),
-                    ...(toolCalls === undefined ? { toolCalls: undefined } : {}),
                     agentId:
                       typeof payload.agent_id === "string"
                         ? payload.agent_id

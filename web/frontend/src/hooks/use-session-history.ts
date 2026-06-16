@@ -11,6 +11,7 @@ import {
 import {
   CHAT_SESSION_ACTIVITY_EVENT,
   type ChatSessionActivityDetail,
+  notifySessionTitle,
 } from "@/features/chat/protocol"
 
 const LIMIT = 20
@@ -238,6 +239,12 @@ export function useSessionHistory({
             item.id === session.id ? { ...item, title: result.title } : item,
           ),
         )
+        // Sync the title to any open chat tab for this session.
+        // Tabs are opened via switchSession(session.id), so match on session.id.
+        notifySessionTitle({
+          sessionId: session.id,
+          title: result.title,
+        })
       } catch (err) {
         clearTimeout(timeout)
         // Don't show toast for abort (timeout) - the dialog will handle it via loading reset

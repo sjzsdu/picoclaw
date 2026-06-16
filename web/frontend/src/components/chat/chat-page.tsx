@@ -1,10 +1,11 @@
 import { useAtom } from "jotai"
-import { IconArrowDown, IconPlus } from "@tabler/icons-react"
+import { IconArrowDown } from "@tabler/icons-react"
 import { useNavigate } from "@tanstack/react-router"
 import {
   type ChangeEvent,
   type ClipboardEvent,
   type DragEvent,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -19,6 +20,7 @@ import {
   type ChatInputDisabledReason,
 } from "@/components/chat/chat-composer"
 import { ChatEmptyState } from "@/components/chat/chat-empty-state"
+import { ChatTabBar } from "@/components/chat/chat-tab-bar"
 import { ModelSelector } from "@/components/chat/model-selector"
 import { SessionHistoryDropdown } from "@/components/chat/session-history-dropdown"
 import { TypingIndicator } from "@/components/chat/typing-indicator"
@@ -43,6 +45,7 @@ import { useChatModels } from "@/hooks/use-chat-models"
 import { useGateway } from "@/hooks/use-gateway"
 import { usePicoChat } from "@/hooks/use-pico-chat"
 import { useSessionHistory } from "@/hooks/use-session-history"
+import { getScrollPosition, MAX_TABS } from "@/features/chat/controller"
 import type {
   AssistantDetailVisibility,
   ChatAttachment,
@@ -127,9 +130,14 @@ export function ChatPage() {
     isTyping,
     activeSessionId,
     contextUsage,
+    tabs,
+    activeTabIndex,
     sendMessage,
     switchSession,
     newChat,
+    closeTab: closeChatTab,
+    switchToTab,
+    reorderTabs,
   } = usePicoChat()
 
   const { state: gwState } = useGateway()
@@ -209,14 +217,32 @@ export function ChatPage() {
     })
   }
 
+  // Track whether user was at bottom to decide auto-scroll vs scroll restore
+  const isAtBottomRef = useRef(isAtBottom)
+  const prevSessionIdRef = useRef(activeSessionId)
+  isAtBottomRef.current = isAtBottom
+
+  // Combined scroll logic: restore saved position on tab switch,
+  // or auto-scroll to bottom when new messages arrive
   useEffect(() => {
-    if (scrollRef.current) {
-      if (isAtBottom) {
-        scrollRef.current.scrollTop = scrollRef.current.scrollHeight
-      }
-      syncScrollState(scrollRef.current)
+    if (!scrollRef.current) return
+
+    const container = scrollRef.current
+    const sessionJustChanged = prevSessionIdRef.current !== activeSessionId
+    prevSessionIdRef.current = activeSessionId
+
+    const savedScrollTop = getScrollPosition(activeSessionId)
+
+    if (savedScrollTop !== undefined && savedScrollTop > 0) {
+      // Tab was switched — restore saved scroll position
+      container.scrollTop = savedScrollTop
+    } else if (!sessionJustChanged && isAtBottomRef.current) {
+      // Same session, user was at bottom — stay at bottom (auto-scroll for new messages)
+      container.scrollTop = container.scrollHeight
     }
-  }, [messages, isTyping, isAtBottom])
+
+    syncScrollState(container)
+  }, [messages, activeSessionId, isTyping])
 
   useEffect(() => {
     const container = scrollRef.current
@@ -410,6 +436,32 @@ export function ChatPage() {
 
   const canSubmit = canSend && (Boolean(input.trim()) || attachments.length > 0)
 
+  const handleNewTab = useCallback(() => {
+    void navigate({
+      to: "/",
+      search: (prev) => ({ ...prev, history: undefined }),
+      replace: true,
+    })
+    void newChat()
+  }, [navigate, newChat])
+
+  const handleSelectTab = useCallback(
+    (index: number) => {
+      const tab = tabs[index]
+      if (!tab) return
+      if (index === activeTabIndex) return
+      switchToTab(index)
+    },
+    [tabs, activeTabIndex, switchToTab],
+  )
+
+  const handleCloseTab = useCallback(
+    (index: number) => {
+      closeChatTab(index)
+    },
+    [closeChatTab],
+  )
+
   return (
     <div className="bg-background/95 flex h-full flex-col">
       <PageHeader
@@ -465,22 +517,6 @@ export function ChatPage() {
           </Select>
         </div>
 
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={() => {
-            void navigate({
-              to: "/",
-              search: (prev) => ({ ...prev, history: undefined }),
-              replace: true,
-            })
-            void newChat()
-          }}
-          className="h-9 gap-2"
-        >
-          <IconPlus className="size-4" />
-          <span className="hidden sm:inline">{t("chat.newChat")}</span>
-        </Button>
         <SessionHistoryDropdown
           sessions={sessions}
           activeSessionId={activeSessionId}
@@ -489,7 +525,7 @@ export function ChatPage() {
               to: "/",
               search: (prev) => ({ ...prev, history: session.id }),
             })
-            void switchSession(session.id)
+            void switchSession(session.id, session.title)
           }}
           onRenameSession={handleRenameSession}
           onDeleteSession={(session) => {
@@ -497,6 +533,16 @@ export function ChatPage() {
           }}
         />
       </PageHeader>
+
+      <ChatTabBar
+        tabs={tabs}
+        activeTabIndex={activeTabIndex}
+        onSelectTab={handleSelectTab}
+        onCloseTab={handleCloseTab}
+        onNewTab={handleNewTab}
+        onReorderTabs={reorderTabs}
+        maxTabsReached={tabs.length >= MAX_TABS}
+      />
 
       <div className="relative min-h-0 flex-1">
         <div
