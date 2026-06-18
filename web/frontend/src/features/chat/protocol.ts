@@ -267,6 +267,27 @@ export function handlePicoMessage(
 
       updateChatStore((prev) => ({
         messages: (() => {
+          const existingMessageIndex = prev.messages.findIndex(
+            (msg) => msg.id === messageId,
+          )
+          if (existingMessageIndex >= 0) {
+            return prev.messages.map((msg, index) =>
+              index === existingMessageIndex
+                ? {
+                    ...msg,
+                    id: messageId,
+                    role: "assistant" as const,
+                    content,
+                    kind,
+                    ...(toolCalls ? { toolCalls } : {}),
+                    ...(attachments ? { attachments } : {}),
+                    ...(agentId ? { agentId } : {}),
+                    ...(modelName ? { modelName } : {}),
+                  }
+                : msg,
+            )
+          }
+
           const alreadyExists = prev.messages.some((msg) =>
             assistantMessageMatchesIncoming(msg, {
               content,
