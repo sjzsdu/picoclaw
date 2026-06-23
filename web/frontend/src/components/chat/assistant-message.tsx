@@ -29,6 +29,56 @@ import {
   type ChatToolCall,
 } from "@/store/chat"
 
+const FOLLOW_UP_PREFIXES = [
+  "如果你愿意",
+  "如果需要",
+  "如果你需要",
+  "你要的话",
+  "需要的话",
+]
+
+function stripWrappingQuote(text: string) {
+  return text
+    .trim()
+    .replace(/^[“”"'「『]+/, "")
+    .replace(/[“”"'」』。，,.\s]+$/, "")
+}
+
+function extractFollowUpPrompt(content: string): string | null {
+  const normalized = content.trim()
+  if (!normalized) {
+    return null
+  }
+
+  const lines = normalized
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+  const tail = lines.slice(-4).join("\n")
+  if (!FOLLOW_UP_PREFIXES.some((prefix) => tail.includes(prefix))) {
+    return null
+  }
+
+  const quoted = tail.match(/[“"「『]([^”"」』]{6,120})[”"」』]/)
+  if (quoted?.[1]) {
+    return `请直接给我这份：${stripWrappingQuote(quoted[1])}`
+  }
+
+  const colonIndex = Math.max(tail.lastIndexOf("："), tail.lastIndexOf(":"))
+  if (colonIndex >= 0) {
+    const afterColon = stripWrappingQuote(tail.slice(colonIndex + 1))
+    if (afterColon.length >= 6 && afterColon.length <= 120) {
+      return `请直接给我这份：${afterColon}`
+    }
+  }
+
+  if (/下一条|直接给你|我可以/.test(tail)) {
+    return "请继续，直接给我你刚才提到的内容"
+  }
+
+  return null
+}
+
 interface AssistantMessageProps {
   content: string
   attachments?: ChatAttachment[]
@@ -36,6 +86,9 @@ interface AssistantMessageProps {
   modelName?: string
   toolCalls?: ChatToolCall[]
   timestamp?: string | number
+  agentId?: string
+  agentName?: string
+  onQuickPrompt?: (prompt: string) => void
 }
 
 export function AssistantMessage({
@@ -45,43 +98,43 @@ export function AssistantMessage({
   modelName,
   toolCalls = [],
   timestamp = "",
+  agentId,
+  agentName,
+  onQuickPrompt,
 }: AssistantMessageProps) {
   const { t } = useTranslation()
   const { copy, isCopied } = useCopyToClipboard()
+  const [isThoughtExpanded, setIsThoughtExpanded] = useState(false)
   const isThought = kind === "thought"
   const isToolCalls = kind === "tool_calls"
   const isCollapsedBlock = isThought || isToolCalls
   const hasText = content.trim().length > 0
   const hasToolCalls = toolCalls.length > 0
+  const formattedTimestamp =
+    timestamp !== "" ? formatMessageTime(timestamp) : ""
+  const senderLabel = [agentName || agentId, modelName]
+    .filter(Boolean)
+    .join(" · ")
   const imageAttachments = attachments.filter(
     (attachment) => attachment.type === "image",
   )
   const fileAttachments = attachments.filter(
     (attachment) => attachment.type !== "image",
   )
-  const [isExpanded, setIsExpanded] = useState(true)
-  const formattedTimestamp =
-    timestamp !== "" ? formatMessageTime(timestamp) : ""
+  const followUpPrompt = !isThought ? extractFollowUpPrompt(content) : null
   const collapsedLabel = isThought
     ? t("chat.reasoningLabel")
     : t("chat.toolCallsLabel")
   const copyMessageLabel = isCopied
     ? t("chat.copiedLabel")
     : t("chat.copyMessage")
-  const trimmedModelName = modelName?.trim() ?? ""
 
   return (
     <div className="group flex w-full flex-col gap-1.5">
       {!isCollapsedBlock && (
-          <div className="text-muted-foreground/60 flex items-center justify-between gap-2 px-1 text-xs opacity-70">
+        <div className="text-muted-foreground flex items-center justify-between gap-2 px-1 text-xs opacity-70">
           <div className="flex items-center gap-2">
-            <span>PicoClaw</span>
-            {trimmedModelName && (
-              <>
-                <span className="opacity-50">•</span>
-                <span>{trimmedModelName}</span>
-              </>
-            )}
+            <span>{senderLabel || "PicoClaw"}</span>
             {formattedTimestamp && (
               <>
                 <span className="opacity-50">•</span>
@@ -96,41 +149,60 @@ export function AssistantMessage({
         <div
           className={cn(
             "relative overflow-hidden rounded-xl border",
-            isCollapsedBlock
-              ? "border-border/30 bg-muted/20 text-muted-foreground dark:border-border/20 dark:bg-muted/10"
-              : "bg-card text-card-foreground border-border/60",
+            isThought
+              ? "border-amber-200/90 bg-amber-50/70 text-amber-950 dark:border-amber-500/35 dark:bg-amber-500/10 dark:text-amber-100"
+              : isCollapsedBlock
+                ? "border-border/30 bg-muted/20 text-muted-foreground dark:border-border/20 dark:bg-muted/10"
+                : "border-border/60 bg-card text-card-foreground",
           )}
         >
           {isCollapsedBlock && (
-            <div
-              className="text-muted-foreground/60 hover:text-muted-foreground/80 flex cursor-pointer items-center justify-between px-3 py-2 text-[12px] font-medium transition-colors select-none"
-              onClick={() => setIsExpanded(!isExpanded)}
+            <button
+              type="button"
+              className={cn(
+                "flex w-full items-center justify-between px-3 py-2 text-left text-[12px] font-medium transition-colors select-none",
+                isThought
+                  ? "text-muted-foreground hover:text-foreground border-b border-amber-200/70 bg-amber-100/40 dark:border-amber-500/20 dark:bg-amber-500/5"
+                  : "text-muted-foreground/60 hover:text-muted-foreground/80",
+              )}
+              onClick={() => setIsThoughtExpanded((value) => !value)}
             >
-              <div className="flex items-center gap-1.5">
+              <div className="flex min-w-0 items-center gap-1.5">
                 {isThought ? (
-                  <IconBrain className="size-3.5" />
+                  <IconBrain className="size-3.5 shrink-0" />
                 ) : (
-                  <IconTool className="size-3.5" />
+                  <IconTool className="size-3.5 shrink-0" />
                 )}
-                <span>{collapsedLabel}</span>
-                {trimmedModelName && (
-                  <span className="text-muted-foreground/45">{trimmedModelName}</span>
-                )}
+                <div className="min-w-0">
+                  <div
+                    className={cn(
+                      isThought && "font-medium text-amber-900 dark:text-amber-100",
+                    )}
+                  >
+                    {collapsedLabel}
+                  </div>
+                  {isThought && (
+                    <div className="truncate text-[10px] opacity-70">
+                      {isThoughtExpanded
+                        ? "Internal reasoning details"
+                        : "Preview hidden by default — expand to inspect"}
+                    </div>
+                  )}
+                </div>
               </div>
-              <div className="flex items-center gap-2">
-                {formattedTimestamp && (
-                  <span className="opacity-50">{formattedTimestamp}</span>
-                )}
+              <span className="flex items-center gap-1 text-[10px] font-medium opacity-80">
+                <span>{isThoughtExpanded ? "Hide" : "Expand"}</span>
                 <IconChevronDown
                   className={cn(
-                    "size-3.5 opacity-0 transition-all duration-200 group-hover:opacity-100",
-                    isExpanded ? "rotate-180" : "",
+                    "size-3 transition-transform",
+                    isThoughtExpanded ? "rotate-180" : "rotate-0",
                   )}
                 />
-              </div>
-            </div>
+              </span>
+            </button>
           )}
-          {(!isCollapsedBlock || isExpanded) && isToolCalls && hasToolCalls && (
+
+          {isToolCalls && hasToolCalls && (!isCollapsedBlock || isThoughtExpanded) && (
             <div className="space-y-3 px-3 pt-0 pb-3">
               {toolCalls.map((toolCall, index) => {
                 const explanation =
@@ -207,13 +279,14 @@ export function AssistantMessage({
               })}
             </div>
           )}
-          {(!isCollapsedBlock || isExpanded) && !isToolCalls && hasText && (
+
+          {(!isCollapsedBlock || isThoughtExpanded) && !isToolCalls && hasText && (
             <div
               className={cn(
-                "prose dark:prose-invert prose-pre:my-2 prose-pre:overflow-x-auto prose-pre:rounded-lg prose-pre:border prose-pre:bg-zinc-100 prose-pre:p-0 prose-pre:text-zinc-900 dark:prose-pre:bg-zinc-950 dark:prose-pre:text-zinc-100 max-w-none [overflow-wrap:anywhere] break-words",
+                "prose prose-sm dark:prose-invert prose-headings:my-2 prose-p:leading-normal prose-ul:my-1.5 prose-ol:my-1.5 prose-li:my-0.5 prose-blockquote:my-2 prose-hr:my-3 prose-table:my-2 prose-pre:my-2 prose-pre:overflow-x-auto prose-pre:rounded-lg prose-pre:border prose-pre:bg-zinc-100 prose-pre:p-0 prose-pre:text-zinc-900 dark:prose-pre:bg-zinc-950 dark:prose-pre:text-zinc-100 max-w-none [overflow-wrap:anywhere] break-words",
                 isThought
-                  ? "prose-p:my-1.5 prose-p:whitespace-pre-wrap px-3 pt-0 pb-3 text-[13px] leading-relaxed opacity-70"
-                  : "prose-p:my-2 prose-p:whitespace-pre-wrap p-4 text-[15px] leading-relaxed",
+                  ? "prose-p:my-1 prose-p:whitespace-pre-wrap p-2.5 text-[12px] leading-normal text-amber-950/90 dark:text-amber-50/90"
+                  : "prose-p:my-1.5 prose-p:whitespace-pre-wrap p-3 text-[14px] leading-normal",
               )}
             >
               <ReactMarkdown
@@ -228,12 +301,19 @@ export function AssistantMessage({
             </div>
           )}
 
+          {isThought && !isThoughtExpanded && (
+            <div className="pointer-events-none absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-amber-50 via-amber-50/95 to-transparent dark:from-amber-500/10 dark:via-amber-500/5" />
+          )}
+
           {!isCollapsedBlock && hasText && (
             <Button
               variant="ghost"
               size="icon"
               className={cn(
-                "bg-background/50 hover:bg-background/80 absolute top-2 right-2 h-7 w-7 opacity-0 transition-opacity group-hover:opacity-100",
+                "absolute top-2 right-2 h-7 w-7 opacity-0 transition-opacity group-hover:opacity-100",
+                isThought
+                  ? "bg-amber-100/70 hover:bg-amber-200/80 dark:bg-amber-500/20 dark:hover:bg-amber-400/30"
+                  : "bg-background/50 hover:bg-background/80",
               )}
               onClick={() => void copy(content)}
               aria-label={copyMessageLabel}
@@ -246,6 +326,24 @@ export function AssistantMessage({
               )}
             </Button>
           )}
+        </div>
+      )}
+
+      {followUpPrompt && onQuickPrompt && (
+        <div className="flex px-1">
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            className="border-border/60 bg-background/80 h-7 max-w-full gap-1.5 rounded-full border px-2.5 text-xs font-normal shadow-sm"
+            onClick={() => onQuickPrompt(followUpPrompt)}
+            title={followUpPrompt}
+          >
+            <span className="shrink-0">继续生成</span>
+            <span className="text-muted-foreground max-w-80 truncate">
+              {followUpPrompt.replace(/^请直接给我这份：/, "")}
+            </span>
+          </Button>
         </div>
       )}
 

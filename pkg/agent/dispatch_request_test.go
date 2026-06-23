@@ -68,7 +68,6 @@ func TestNormalizeProcessOptions_UsesDispatchAsSourceOfTruth(t *testing.T) {
 	}
 	scope := &session.SessionScope{
 		Version:    session.ScopeVersionV1,
-		AgentID:    "support",
 		Channel:    "slack",
 		Account:    "workspace-a",
 		Dimensions: []string{"chat"},
@@ -104,7 +103,7 @@ func TestNormalizeProcessOptions_UsesDispatchAsSourceOfTruth(t *testing.T) {
 	if opts.RouteResult == nil || opts.RouteResult.AgentID != "support" {
 		t.Fatalf("RouteResult = %#v, want support route", opts.RouteResult)
 	}
-	if opts.SessionScope == nil || opts.SessionScope.AgentID != "support" {
+	if opts.SessionScope == nil || opts.SessionScope.Channel != "slack" {
 		t.Fatalf("SessionScope = %#v, want support scope", opts.SessionScope)
 	}
 }
@@ -117,7 +116,6 @@ func TestNormalizeProcessOptions_InfersLegacyChatTypeFromSessionScope(t *testing
 		UserMessage: "hello",
 		SessionScope: &session.SessionScope{
 			Version:    session.ScopeVersionV1,
-			AgentID:    "main",
 			Channel:    "telegram",
 			Dimensions: []string{"chat"},
 			Values: map[string]string{

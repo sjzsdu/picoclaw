@@ -536,6 +536,31 @@ func TestLoadConfig_EvolutionEnabledWithoutModeUsesObserveSemantics(t *testing.T
 	assert.False(t, cfg.Evolution.AutoAppliesDrafts())
 }
 
+func TestLoadConfig_MessageToolMediaEnabled(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	raw := `{
+		"version": 3,
+		"tools": {
+			"message": {
+				"enabled": true,
+				"media_enabled": true
+			}
+		}
+	}`
+	if err := os.WriteFile(configPath, []byte(raw), 0o644); err != nil {
+		t.Fatalf("WriteFile(configPath): %v", err)
+	}
+
+	cfg, err := LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig() error: %v", err)
+	}
+
+	assert.True(t, cfg.Tools.Message.Enabled)
+	assert.True(t, cfg.Tools.Message.MediaEnabled)
+}
+
 func TestLoadConfig_EvolutionExplicitApplyModeAutoApplies(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.json")

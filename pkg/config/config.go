@@ -319,6 +319,7 @@ type AgentConfig struct {
 	Model     *AgentModelConfig `json:"model,omitempty"`
 	Skills    []string          `json:"skills,omitempty"`
 	Subagents *SubagentsConfig  `json:"subagents,omitempty"`
+	NoHistory bool              `json:"no_history,omitempty"`
 }
 
 type SubagentsConfig struct {
@@ -764,9 +765,10 @@ type ModelConfig struct {
 	Model     string `json:"model"`      // Model identifier, optionally provider-prefixed.
 
 	// HTTP-based providers
-	APIBase   string   `json:"api_base,omitempty"`  // API endpoint URL
-	Proxy     string   `json:"proxy,omitempty"`     // HTTP proxy URL
-	Fallbacks []string `json:"fallbacks,omitempty"` // Fallback model names for failover
+	APIBase   string        `json:"api_base,omitempty"`                // API endpoint URL
+	APIKeys   SecureStrings `json:"api_keys,omitzero" yaml:"api_keys,omitempty"` // API credentials (supports multiple keys)
+	Proxy     string        `json:"proxy,omitempty"`                   // HTTP proxy URL
+	Fallbacks []string      `json:"fallbacks,omitempty"`               // Fallback model names for failover
 
 	// Special providers (CLI-based, OAuth, etc.)
 	AuthMethod  string `json:"auth_method,omitempty"`  // Authentication method: oauth, token
@@ -774,20 +776,23 @@ type ModelConfig struct {
 	Workspace   string `json:"workspace,omitempty"`    // Workspace path for CLI-based providers
 
 	// Optional optimizations
-	RPM                 int                  `json:"rpm,omitempty"`              // Requests per minute limit
-	MaxTokensField      string               `json:"max_tokens_field,omitempty"` // Field name for max tokens (e.g., "max_completion_tokens")
+	// Optional optimizations
+	RPM                 int                  `json:"rpm,omitempty"`                    // Requests per minute limit
+	MaxTokensField      string               `json:"max_tokens_field,omitempty"`       // Field name for max tokens (e.g., "max_completion_tokens")
 	RequestTimeout      int                  `json:"request_timeout,omitempty"`
-	ThinkingLevel       string               `json:"thinking_level,omitempty"`        // Extended thinking: off|low|medium|high|xhigh|adaptive
-	ToolSchemaTransform string               `json:"tool_schema_transform,omitempty"` // Optional tool schema compatibility transform (e.g. "simple")
-	Streaming           ModelStreamingConfig `json:"streaming,omitzero"`              // Opt-in for provider streaming on this model entry
-	ExtraBody           map[string]any       `json:"extra_body,omitempty"`            // Additional fields to inject into request body
-	CustomHeaders       map[string]string    `json:"custom_headers,omitempty"`        // Additional headers to inject into every HTTP request
+	ThinkingLevel       string               `json:"thinking_level,omitempty"`          // Extended thinking: off|low|medium|high|xhigh|adaptive
+	ToolSchemaTransform string               `json:"tool_schema_transform,omitempty"`   // Optional tool schema compatibility transform (e.g. "simple")
+	Streaming           ModelStreamingConfig `json:"streaming,omitzero"`                // Opt-in for provider streaming on this model entry
+	DisableTools        bool                 `json:"disable_tools,omitempty"`
+	ExtraBody           map[string]any       `json:"extra_body,omitempty"`              // Additional fields to inject into request body
+	CustomHeaders       map[string]string    `json:"custom_headers,omitempty"`          // Additional headers to inject into every HTTP request
 
-	APIKeys SecureStrings `json:"api_keys,omitzero" yaml:"api_keys,omitempty"` // API authentication keys (multiple keys for failover)
 
-	// Enabled indicates whether this model entry is active. When omitted in
-	// existing configs, the field is inferred during load: models with API keys
-	// or the reserved "local-model" name are auto-enabled.
+	LastTestStatus   string `json:"last_test_status,omitempty" yaml:"last_test_status,omitempty"`
+	LastTestReason   string `json:"last_test_reason,omitempty" yaml:"last_test_reason,omitempty"`
+	LastTestMessage  string `json:"last_test_message,omitempty" yaml:"last_test_message,omitempty"`
+	LastTestedAtUnix int64  `json:"last_tested_at_unix,omitempty" yaml:"last_tested_at_unix,omitempty"`
+
 	Enabled bool `json:"enabled,omitempty" yaml:"enabled,omitempty"`
 	// UserAgent is the user agent string to use for HTTP requests.
 	UserAgent string `json:"user_agent,omitempty" yaml:"-"`

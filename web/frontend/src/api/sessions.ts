@@ -1,5 +1,17 @@
 import { launcherFetch } from "@/api/http"
 
+export class SessionHistoryError extends Error {
+  readonly sessionId: string
+  readonly status: number
+
+  constructor(sessionId: string, status: number) {
+    super(`Failed to fetch session ${sessionId}: ${status}`)
+    this.name = "SessionHistoryError"
+    this.sessionId = sessionId
+    this.status = status
+  }
+}
+
 export interface SessionSummary {
   id: string
   title: string
@@ -7,16 +19,21 @@ export interface SessionSummary {
   message_count: number
   created: string
   updated: string
+  session_id?: string
+  agent_id?: string
 }
 
 export interface SessionDetail {
   id: string
+  title: string
   messages: {
     role: "user" | "assistant"
     content: string
     created_at?: string
+    reasoning_content?: string
     kind?: "normal" | "thought" | "tool_calls"
     model_name?: string
+    message_type?: "tool_feedback"
     media?: string[]
     attachments?: {
       type?: "image" | "audio" | "video" | "file"
@@ -60,7 +77,7 @@ export async function getSessions(
 export async function getSessionHistory(id: string): Promise<SessionDetail> {
   const res = await launcherFetch(`/api/sessions/${encodeURIComponent(id)}`)
   if (!res.ok) {
-    throw new Error(`Failed to fetch session ${id}: ${res.status}`)
+    throw new SessionHistoryError(id, res.status)
   }
   return res.json()
 }
@@ -72,4 +89,23 @@ export async function deleteSession(id: string): Promise<void> {
   if (!res.ok) {
     throw new Error(`Failed to delete session ${id}: ${res.status}`)
   }
+}
+
+export async function updateSessionTitle(
+  id: string,
+  title: string,
+  signal?: AbortSignal,
+): Promise<{ title: string }> {
+  const res = await launcherFetch(`/api/sessions/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ title }),
+    signal,
+  })
+  if (!res.ok) {
+    throw new Error(`Failed to update session ${id}: ${res.status}`)
+  }
+  return res.json()
 }

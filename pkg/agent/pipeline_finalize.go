@@ -4,6 +4,7 @@ package agent
 
 import (
 	"context"
+	"strings"
 
 	"github.com/sipeed/picoclaw/pkg/bus"
 	runtimeevents "github.com/sipeed/picoclaw/pkg/events"
@@ -41,16 +42,18 @@ func (p *Pipeline) Finalize(
 
 	ts.setPhase(TurnPhaseFinalizing)
 	ts.setFinalContent(finalContent)
-	if !ts.opts.NoHistory {
+	if !ts.opts.SkipSessionPersistence {
 		finalMsg := providers.Message{
 			Role:             "assistant",
 			Content:          finalContent,
 			ModelName:        exec.llmModelName,
 			ReasoningContent: responseReasoningContent(exec.response),
 		}
-		ts.agent.Sessions.AddFullMessage(ts.sessionKey, finalMsg)
-		ts.recordPersistedMessage(finalMsg)
-		ts.ingestMessage(turnCtx, al, finalMsg)
+		if strings.TrimSpace(finalMsg.Content) != "" || strings.TrimSpace(finalMsg.ReasoningContent) != "" {
+			ts.agent.Sessions.AddFullMessage(ts.sessionKey, finalMsg)
+			ts.recordPersistedMessage(finalMsg)
+			ts.ingestMessage(turnCtx, al, finalMsg)
+		}
 		if err := ts.agent.Sessions.Save(ts.sessionKey); err != nil {
 			al.emitEvent(
 				runtimeevents.KindAgentError,
@@ -72,6 +75,7 @@ func (p *Pipeline) Finalize(
 				SessionKey: ts.sessionKey,
 				Reason:     ContextCompressReasonSummarize,
 				Budget:     ts.agent.ContextWindow,
+				Agent:      ts.agent,
 			},
 		)
 	}

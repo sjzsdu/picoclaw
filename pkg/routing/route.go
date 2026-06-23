@@ -39,6 +39,15 @@ func NewRouteResolver(cfg *config.Config) *RouteResolver {
 func (r *RouteResolver) ResolveRoute(inbound bus.InboundContext) ResolvedRoute {
 	channel := strings.ToLower(strings.TrimSpace(inbound.Channel))
 	accountID := NormalizeAccountID(inbound.Account)
+	if forcedAgentID := strings.TrimSpace(inbound.Raw["agent_id"]); forcedAgentID != "" {
+		return ResolvedRoute{
+			AgentID:       r.pickAgentID(forcedAgentID),
+			Channel:       channel,
+			AccountID:     accountID,
+			SessionPolicy: r.sessionPolicy(nil),
+			MatchedBy:     "raw.agent_id",
+		}
+	}
 	identityLinks := cloneIdentityLinks(r.cfg.Session.IdentityLinks)
 	view := buildDispatchView(inbound, identityLinks)
 

@@ -65,6 +65,8 @@ type AgentLoop struct {
 	// workerSem limits concurrent turn processing workers.
 	workerSem chan struct{}
 
+	workerID int
+
 	// activeTurnStates tracks active turns per session to prevent duplicates.
 	activeTurnStates sync.Map
 	subTurnCounter   atomic.Int64
@@ -105,7 +107,8 @@ type processOptions struct {
 	SendResponse            bool                   // Whether to send response via bus
 	AllowInterimPicoPublish bool                   // Whether pico tool-call interim text can be published when SendResponse is false
 	SuppressToolFeedback    bool                   // Whether to suppress inline tool feedback messages
-	NoHistory               bool                   // If true, don't load session history (for heartbeat)
+	NoHistory              bool                   // If true, don't load session history (for heartbeat)
+	SkipSessionPersistence bool                   // If true, do not persist messages for this turn
 	SkipInitialSteeringPoll bool                   // If true, skip the steering poll at loop start (used by Continue)
 	InboundContext          *bus.InboundContext    // Normalized inbound facts for events/hooks
 	RouteResult             *routing.ResolvedRoute // Route decision snapshot for events/hooks
@@ -320,6 +323,46 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 
 func (al *AgentLoop) Stop() {
 	al.running.Store(false)
+}
+
+func (al *AgentLoop) SetWorkerID(id int) {
+	al.workerID = id
+}
+
+// RunInbox processes messages from a dedicated worker inbox until the context
+// is canceled or the inbox channel is closed.
+func (al *AgentLoop) RunInbox(ctx context.Context, inbox <-chan bus.InboundMessage) error {
+	if err := al.ensureHooksInitialized(ctx); err != nil {
+		return err
+	}
+	if err := al.ensureMCPInitialized(ctx); err != nil {
+		return err
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case msg, ok := <-inbox:
+			if !ok {
+				return nil
+			}
+			if msg.Channel == "system" {
+				al.processMessageSync(ctx, msg)
+				continue
+			}
+			al.processMessageSync(ctx, msg)
+		}
+	}
+}
+
+func (al *AgentLoop) reloadProviderAndConfig(
+	ctx context.Context,
+	provider providers.LLMProvider,
+	cfg *config.Config,
+	_ bool,
+) error {
+	return al.ReloadProviderAndConfig(ctx, provider, cfg)
 }
 
 // Close releases resources held by agent session stores. Call after Stop.

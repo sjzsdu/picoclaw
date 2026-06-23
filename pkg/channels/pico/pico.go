@@ -324,6 +324,7 @@ func (c *PicoChannel) Send(ctx context.Context, msg bus.OutboundMessage) ([]stri
 	payload := map[string]any{
 		PayloadKeyContent: content,
 		"message_id":      msgID,
+		"agent_id":        msg.AgentID,
 	}
 	if modelName := strings.TrimSpace(msg.Context.Raw[PayloadKeyModelName]); modelName != "" {
 		payload[PayloadKeyModelName] = modelName
@@ -1200,11 +1201,19 @@ func (c *PicoChannel) handleMessageSend(pc *picoConn, msg PicoMessage) {
 		"session_id": sessionID,
 		"conn_id":    pc.id,
 	}
+	if requestedAgentID, _ := msg.Payload["agent_id"].(string); strings.TrimSpace(requestedAgentID) != "" {
+		metadata["agent_id"] = strings.TrimSpace(requestedAgentID)
+	}
+	if requestedModelName, _ := msg.Payload["model_name"].(string); strings.TrimSpace(requestedModelName) != "" {
+		metadata["model_name"] = strings.TrimSpace(requestedModelName)
+	}
 
 	logger.DebugCF("pico", "Received message", map[string]any{
 		"session_id": sessionID,
 		"preview":    truncate(content, 50),
 		"media":      len(media),
+		"agent_id":   metadata["agent_id"],
+		"model_name": metadata["model_name"],
 	})
 
 	sender := bus.SenderInfo{

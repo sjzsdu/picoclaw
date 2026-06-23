@@ -39,40 +39,79 @@ function toChatAttachments({
   return merged.length > 0 ? merged : undefined
 }
 
-export async function loadSessionMessages(
-  sessionId: string,
-): Promise<ChatMessage[]> {
-  const detail = await getSessionHistory(sessionId)
-  return detail.messages.map((message, index) => ({
-    id: `hist-${index}-${Date.now()}`,
-    role: message.role,
-    content: message.content,
-    kind: message.role === "assistant" ? (message.kind ?? "normal") : undefined,
-    modelName: message.model_name,
-    toolCalls:
-      message.role === "assistant"
-        ? parseToolCallsValue(message.tool_calls)
-        : undefined,
-    attachments: toChatAttachments({
-      media: message.media,
-      attachments: message.attachments,
-    }),
-    timestamp: message.created_at ?? detail.updated,
-  }))
+function shouldHideHistoryMessage(message: {
+  role: "user" | "assistant"
+  content: string
+  kind?: "normal" | "thought" | "tool_calls"
+  message_type?: "tool_feedback"
+}) {
+  if (message.role !== "assistant") {
+    return false
+  }
+
+  if (message.kind === "thought") {
+    return false
+  }
+
+  return message.message_type === "tool_feedback"
 }
 
+export interface SessionMessagesResult {
+  messages: ChatMessage[]
+  title: string
+}
+
+export async function loadSessionMessages(
+  sessionId: string,
+): Promise<SessionMessagesResult> {
+  const detail = await getSessionHistory(sessionId)
+  const fallbackTime = detail.updated
+
+  return {
+    title: detail.title,
+    messages: detail.messages
+      .filter((message) => !shouldHideHistoryMessage(message))
+      .map((message, index) => ({
+        id: `hist-${index}-${Date.now()}`,
+        role: message.role,
+        content: message.content,
+        reasoningContent: message.reasoning_content,
+        kind:
+          message.role === "assistant"
+            ? (message.kind ?? "normal")
+            : undefined,
+        modelName: message.model_name,
+        toolCalls:
+          message.role === "assistant"
+            ? parseToolCallsValue(message.tool_calls)
+            : undefined,
+        attachments: toChatAttachments({
+          media: message.media,
+          attachments: message.attachments,
+        }),
+        timestamp: message.created_at ?? fallbackTime,
+      })),
+  }
+}
+
+/**
+ * Normalize a timestamp to seconds-precision, so that the same message
+ * sourced from the local WebSocket (ms-precision `Date.now()`) and from
+ * the server API (seconds-precision `created_at`) always produce the same
+ * signature for dedup purposes.
+ */
 function normalizeMessageTimestamp(timestamp: number | string): string {
   if (typeof timestamp === "number") {
-    return String(normalizeUnixTimestamp(timestamp))
+    return String(Math.floor(normalizeUnixTimestamp(timestamp) / 1000))
   }
 
   const trimmed = timestamp.trim()
   if (/^-?\d+(\.\d+)?$/.test(trimmed)) {
-    return String(normalizeUnixTimestamp(Number(trimmed)))
+    return String(Math.floor(normalizeUnixTimestamp(Number(trimmed)) / 1000))
   }
 
   const parsed = Date.parse(trimmed)
-  return Number.isNaN(parsed) ? trimmed : String(parsed)
+  return Number.isNaN(parsed) ? trimmed : String(Math.floor(parsed / 1000))
 }
 
 function messageSignature(message: ChatMessage): string {
