@@ -76,6 +76,9 @@ func (r *RouteResolver) pickAgentID(agentID string) string {
 		return NormalizeAgentID(r.resolveDefaultAgentID())
 	}
 	normalized := NormalizeAgentID(trimmed)
+	if normalized == DefaultAgentID {
+		return DefaultAgentID
+	}
 	agents := r.cfg.Agents.List
 	if len(agents) == 0 {
 		return normalized
