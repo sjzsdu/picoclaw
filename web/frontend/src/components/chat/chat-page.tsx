@@ -146,7 +146,6 @@ export function ChatPage() {
   const {
     agents,
     selectedAgentId,
-    activeAgentId,
     hasSelectableAgents,
     handleSelectAgent,
   } = useChatAgents(activeSessionId)
@@ -220,7 +219,9 @@ export function ChatPage() {
   // Track whether user was at bottom to decide auto-scroll vs scroll restore
   const isAtBottomRef = useRef(isAtBottom)
   const prevSessionIdRef = useRef(activeSessionId)
-  isAtBottomRef.current = isAtBottom
+  useEffect(() => {
+    isAtBottomRef.current = isAtBottom
+  }, [isAtBottom])
 
   // Combined scroll logic: restore saved position on tab switch,
   // or auto-scroll to bottom when new messages arrive
@@ -299,7 +300,7 @@ export function ChatPage() {
       sendMessage({
         content: input,
         attachments,
-        agentId: activeAgentId || undefined,
+        agentId: selectedAgentId || undefined,
         modelName: selectedModelName || undefined,
       })
     ) {
@@ -317,7 +318,7 @@ export function ChatPage() {
       sendMessage({
         content: prompt,
         attachments: [],
-        agentId: activeAgentId || undefined,
+        agentId: selectedAgentId || undefined,
         modelName: selectedModelName || undefined,
       })
     ) {
