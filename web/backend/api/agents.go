@@ -11,6 +11,7 @@ import (
 
 func (h *Handler) registerAgentRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/agents", h.handleListAgents)
+	mux.HandleFunc("GET /api/agents/{id}/detail", h.handleGetAgentDetail)
 	mux.HandleFunc("POST /api/agent-configs", h.handleCreateAgentConfig)
 	mux.HandleFunc("GET /api/agent-configs", h.handleListAgentConfigs)
 	mux.HandleFunc("GET /api/agent-configs/{id}", h.handleGetAgentConfig)

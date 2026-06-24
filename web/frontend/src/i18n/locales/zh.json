@@ -625,7 +625,8 @@
         },
         "actions": {
           "edit": "编辑",
-          "delete": "删除"
+          "delete": "删除",
+          "details": "详情"
         },
         "badge": {
           "main": "主智能体",

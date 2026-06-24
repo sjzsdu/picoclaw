@@ -2,11 +2,13 @@ import {
   IconDeviceFloppy,
   IconEdit,
   IconFolderOpen,
+  IconInfoCircle,
   IconLoader2,
   IconPlus,
   IconTrash,
 } from "@tabler/icons-react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { Link } from "@tanstack/react-router"
 import { useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
@@ -283,35 +285,46 @@ export function ManagePage() {
                       </div>
                     </div>
 
-                    {isEditableAgent(agent) && (
-                      <div className="flex flex-wrap gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setWorkspaceEditorAgentId(agent.id)}
+                    <div className="flex flex-wrap gap-2">
+                      <Button variant="outline" size="sm" asChild>
+                        <Link
+                          to="/agent/$agentId"
+                          params={{ agentId: agent.id }}
                         >
-                          <IconFolderOpen className="size-4" />
-                          {t("pages.agent.manage.workspaceFiles.button")}
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => openEditDialog(agent)}
-                        >
-                          <IconEdit className="size-4" />
-                          {t("pages.agent.manage.actions.edit")}
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => openDeleteDialog(agent)}
-                          disabled={!agent.can_delete}
-                        >
-                          <IconTrash className="size-4" />
-                          {t("pages.agent.manage.actions.delete")}
-                        </Button>
-                      </div>
-                    )}
+                          <IconInfoCircle className="size-4" />
+                          {t("pages.agent.manage.actions.details")}
+                        </Link>
+                      </Button>
+                      {isEditableAgent(agent) && (
+                        <>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setWorkspaceEditorAgentId(agent.id)}
+                          >
+                            <IconFolderOpen className="size-4" />
+                            {t("pages.agent.manage.workspaceFiles.button")}
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => openEditDialog(agent)}
+                          >
+                            <IconEdit className="size-4" />
+                            {t("pages.agent.manage.actions.edit")}
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => openDeleteDialog(agent)}
+                            disabled={!agent.can_delete}
+                          >
+                            <IconTrash className="size-4" />
+                            {t("pages.agent.manage.actions.delete")}
+                          </Button>
+                        </>
+                      )}
+                    </div>
                   </CardContent>
                 </Card>
               ))}

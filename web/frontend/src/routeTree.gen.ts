@@ -24,6 +24,7 @@ import { Route as AgentToolsRouteImport } from './routes/agent/tools'
 import { Route as AgentSkillsRouteImport } from './routes/agent/skills'
 import { Route as AgentManageRouteImport } from './routes/agent/manage'
 import { Route as AgentHubRouteImport } from './routes/agent/hub'
+import { Route as AgentAgentIdRouteImport } from './routes/agent/$agentId'
 
 const ModelsRoute = ModelsRouteImport.update({
   id: '/models',
@@ -100,6 +101,11 @@ const AgentHubRoute = AgentHubRouteImport.update({
   path: '/hub',
   getParentRoute: () => AgentRoute,
 } as any)
+const AgentAgentIdRoute = AgentAgentIdRouteImport.update({
+  id: '/$agentId',
+  path: '/$agentId',
+  getParentRoute: () => AgentRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -111,6 +117,7 @@ export interface FileRoutesByFullPath {
   '/launcher-setup': typeof LauncherSetupRoute
   '/logs': typeof LogsRoute
   '/models': typeof ModelsRoute
+  '/agent/$agentId': typeof AgentAgentIdRoute
   '/agent/hub': typeof AgentHubRoute
   '/agent/manage': typeof AgentManageRoute
   '/agent/skills': typeof AgentSkillsRoute
@@ -128,6 +135,7 @@ export interface FileRoutesByTo {
   '/launcher-setup': typeof LauncherSetupRoute
   '/logs': typeof LogsRoute
   '/models': typeof ModelsRoute
+  '/agent/$agentId': typeof AgentAgentIdRoute
   '/agent/hub': typeof AgentHubRoute
   '/agent/manage': typeof AgentManageRoute
   '/agent/skills': typeof AgentSkillsRoute
@@ -146,6 +154,7 @@ export interface FileRoutesById {
   '/launcher-setup': typeof LauncherSetupRoute
   '/logs': typeof LogsRoute
   '/models': typeof ModelsRoute
+  '/agent/$agentId': typeof AgentAgentIdRoute
   '/agent/hub': typeof AgentHubRoute
   '/agent/manage': typeof AgentManageRoute
   '/agent/skills': typeof AgentSkillsRoute
@@ -165,6 +174,7 @@ export interface FileRouteTypes {
     | '/launcher-setup'
     | '/logs'
     | '/models'
+    | '/agent/$agentId'
     | '/agent/hub'
     | '/agent/manage'
     | '/agent/skills'
@@ -182,6 +192,7 @@ export interface FileRouteTypes {
     | '/launcher-setup'
     | '/logs'
     | '/models'
+    | '/agent/$agentId'
     | '/agent/hub'
     | '/agent/manage'
     | '/agent/skills'
@@ -199,6 +210,7 @@ export interface FileRouteTypes {
     | '/launcher-setup'
     | '/logs'
     | '/models'
+    | '/agent/$agentId'
     | '/agent/hub'
     | '/agent/manage'
     | '/agent/skills'
@@ -326,6 +338,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AgentHubRouteImport
       parentRoute: typeof AgentRoute
     }
+    '/agent/$agentId': {
+      id: '/agent/$agentId'
+      path: '/$agentId'
+      fullPath: '/agent/$agentId'
+      preLoaderRoute: typeof AgentAgentIdRouteImport
+      parentRoute: typeof AgentRoute
+    }
   }
 }
 
@@ -342,6 +361,7 @@ const ChannelsRouteRouteWithChildren = ChannelsRouteRoute._addFileChildren(
 )
 
 interface AgentRouteChildren {
+  AgentAgentIdRoute: typeof AgentAgentIdRoute
   AgentHubRoute: typeof AgentHubRoute
   AgentManageRoute: typeof AgentManageRoute
   AgentSkillsRoute: typeof AgentSkillsRoute
@@ -349,6 +369,7 @@ interface AgentRouteChildren {
 }
 
 const AgentRouteChildren: AgentRouteChildren = {
+  AgentAgentIdRoute: AgentAgentIdRoute,
   AgentHubRoute: AgentHubRoute,
   AgentManageRoute: AgentManageRoute,
   AgentSkillsRoute: AgentSkillsRoute,

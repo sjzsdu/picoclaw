@@ -625,7 +625,8 @@
         },
         "actions": {
           "edit": "Edit",
-          "delete": "Delete"
+          "delete": "Delete",
+          "details": "Details"
         },
         "badge": {
           "main": "Main",
