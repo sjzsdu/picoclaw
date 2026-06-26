@@ -637,6 +637,73 @@ func TestHandleSessions_JSONLScopeDiscovery(t *testing.T) {
 	}
 }
 
+func TestHandleGetSession_PicoScopedSessionReturnsAllTurns(t *testing.T) {
+	configPath, cleanup := setupOAuthTestEnv(t)
+	defer cleanup()
+
+	dir := sessionsTestDir(t, configPath)
+	store, storeErr := memory.NewJSONLStore(dir)
+	if storeErr != nil {
+		t.Fatalf("NewJSONLStore() error = %v", storeErr)
+	}
+
+	browserSessionID := "browser-refresh-all-turns"
+	scope := session.SessionScope{
+		Version:    session.ScopeVersionV1,
+		Channel:    "pico",
+		Account:    "default",
+		Dimensions: []string{"chat"},
+		Values: map[string]string{
+			"chat": "direct:pico:" + browserSessionID,
+		},
+	}
+	sessionKey := session.BuildSessionKey(scope)
+	scopeData, err := json.Marshal(scope)
+	if err != nil {
+		t.Fatalf("Marshal(scope) error = %v", err)
+	}
+	aliases := []string{"agent:main:pico:direct:pico:" + browserSessionID}
+	if err := store.UpsertSessionMeta(nil, sessionKey, scopeData, aliases); err != nil {
+		t.Fatalf("UpsertSessionMeta() error = %v", err)
+	}
+
+	messages := []providers.Message{
+		{Role: "user", Content: "first question"},
+		{Role: "assistant", Content: "first answer"},
+		{Role: "user", Content: "second question"},
+		{Role: "assistant", Content: "second answer"},
+	}
+	for _, msg := range messages {
+		if err := store.AddFullMessage(nil, sessionKey, msg); err != nil {
+			t.Fatalf("AddFullMessage(%q) error = %v", msg.Content, err)
+		}
+	}
+
+	h := NewHandler(configPath)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	detailRec := httptest.NewRecorder()
+	detailReq := httptest.NewRequest(http.MethodGet, "/api/sessions/"+browserSessionID, nil)
+	mux.ServeHTTP(detailRec, detailReq)
+	if detailRec.Code != http.StatusOK {
+		t.Fatalf("detail status = %d, want %d, body=%s", detailRec.Code, http.StatusOK, detailRec.Body.String())
+	}
+
+	var detail struct {
+		Messages []sessionChatMessage `json:"messages"`
+	}
+	if err := json.Unmarshal(detailRec.Body.Bytes(), &detail); err != nil {
+		t.Fatalf("Unmarshal(detail) error = %v", err)
+	}
+	if len(detail.Messages) != 4 {
+		t.Fatalf("len(messages) = %d, want 4: %#v", len(detail.Messages), detail.Messages)
+	}
+	if detail.Messages[0].Content != "first question" || detail.Messages[3].Content != "second answer" {
+		t.Fatalf("messages = %#v, want all turns in order", detail.Messages)
+	}
+}
+
 func TestHandleGetSession_SkipsTransientThoughtMessages(t *testing.T) {
 	configPath, cleanup := setupOAuthTestEnv(t)
 	defer cleanup()

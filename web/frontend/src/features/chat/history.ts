@@ -67,30 +67,47 @@ export async function loadSessionMessages(
   const detail = await getSessionHistory(sessionId)
   const fallbackTime = detail.updated
 
+  const summary = detail.summary.trim()
+  const summaryMessages: ChatMessage[] = summary
+    ? [
+        {
+          id: `hist-summary-${Date.now()}`,
+          role: "assistant",
+          content: `Earlier conversation summary:\n\n${summary}`,
+          reasoningContent: summary,
+          kind: "thought",
+          timestamp: detail.created || fallbackTime,
+        },
+      ]
+    : []
+
   return {
     title: detail.title,
-    messages: detail.messages
-      .filter((message) => !shouldHideHistoryMessage(message))
-      .map((message, index) => ({
-        id: `hist-${index}-${Date.now()}`,
-        role: message.role,
-        content: message.content,
-        reasoningContent: message.reasoning_content,
-        kind:
-          message.role === "assistant"
-            ? (message.kind ?? "normal")
-            : undefined,
-        modelName: message.model_name,
-        toolCalls:
-          message.role === "assistant"
-            ? parseToolCallsValue(message.tool_calls)
-            : undefined,
-        attachments: toChatAttachments({
-          media: message.media,
-          attachments: message.attachments,
-        }),
-        timestamp: message.created_at ?? fallbackTime,
-      })),
+    messages: [
+      ...summaryMessages,
+      ...detail.messages
+        .filter((message) => !shouldHideHistoryMessage(message))
+        .map((message, index) => ({
+          id: `hist-${index}-${Date.now()}`,
+          role: message.role,
+          content: message.content,
+          reasoningContent: message.reasoning_content,
+          kind:
+            message.role === "assistant"
+              ? (message.kind ?? "normal")
+              : undefined,
+          modelName: message.model_name,
+          toolCalls:
+            message.role === "assistant"
+              ? parseToolCallsValue(message.tool_calls)
+              : undefined,
+          attachments: toChatAttachments({
+            media: message.media,
+            attachments: message.attachments,
+          }),
+          timestamp: message.created_at ?? fallbackTime,
+        })),
+    ],
   }
 }
 
