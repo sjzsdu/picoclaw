@@ -405,6 +405,23 @@ export function handlePicoMessage(
             )
           }
 
+          const incomingAgentId =
+            typeof payload.agent_id === "string"
+              ? payload.agent_id
+              : undefined
+          const alreadyExists = messages.some((msg) =>
+            assistantMessageMatchesIncoming(msg, {
+              content,
+              kind,
+              agentId: incomingAgentId,
+              modelName,
+              toolCalls,
+            }),
+          )
+          if (alreadyExists) {
+            return messages
+          }
+
           return [
             ...messages,
             {
@@ -413,10 +430,7 @@ export function handlePicoMessage(
               content,
               ...(hasKind ? { kind } : {}),
               ...(toolCalls ? { toolCalls } : {}),
-              agentId:
-                typeof payload.agent_id === "string"
-                  ? payload.agent_id
-                  : undefined,
+              agentId: incomingAgentId,
               ...(modelName ? { modelName } : {}),
               ...(attachments ? { attachments } : {}),
               timestamp,
