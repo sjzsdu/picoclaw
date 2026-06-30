@@ -87,8 +87,8 @@ function SortableTab({
       className={cn(
         "group relative flex max-w-48 shrink-0 cursor-grab items-center gap-1 rounded-t-md px-2.5 py-1.5 text-xs font-medium transition-[color,background,box-shadow] active:cursor-grabbing",
         isActive
-          ? "bg-background text-foreground shadow-[0_1px_0_0_hsl(var(--background))]"
-          : "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
+          ? "bg-background text-foreground shadow-[0_1px_0_0_hsl(var(--background))] after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:bg-foreground"
+          : "text-muted-foreground hover:bg-muted/50 hover:text-muted-foreground/80",
         isDragging && "z-50 shadow-md ring-1 ring-border/50",
       )}
       {...attributes}
