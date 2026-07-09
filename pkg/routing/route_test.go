@@ -201,6 +201,28 @@ func TestResolveRoute_InvalidAgentFallsToDefault(t *testing.T) {
 	}
 }
 
+func TestResolveRoute_ForcedVirtualMainAgentDoesNotFallBackToConfiguredDefault(t *testing.T) {
+	agents := []config.AgentConfig{
+		{ID: "stock-analyst", Default: true},
+	}
+	cfg := testConfig(agents)
+	r := NewRouteResolver(cfg)
+
+	route := r.ResolveRoute(bus.InboundContext{
+		Channel: "pico",
+		Raw: map[string]string{
+			"agent_id": "main",
+		},
+	})
+
+	if route.AgentID != DefaultAgentID {
+		t.Fatalf("AgentID = %q, want %q", route.AgentID, DefaultAgentID)
+	}
+	if route.MatchedBy != "raw.agent_id" {
+		t.Fatalf("MatchedBy = %q, want raw.agent_id", route.MatchedBy)
+	}
+}
+
 func TestResolveRoute_DefaultAgentSelection(t *testing.T) {
 	agents := []config.AgentConfig{
 		{ID: "alpha"},

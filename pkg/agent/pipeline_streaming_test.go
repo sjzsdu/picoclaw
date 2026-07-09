@@ -313,12 +313,12 @@ func TestConfiguredStreamingEligibilityGates(t *testing.T) {
 			wantChatCalls:     1,
 		},
 		{
-			name:              "model disabled uses chat",
+			name:              "model streaming flag omitted or false still streams when provider supports it",
 			channel:           "pico",
 			channelStreaming:  true,
 			streamingProvider: true,
 			streamDelegate:    true,
-			wantChatCalls:     1,
+			wantStreamCalls:   1,
 		},
 		{
 			name:             "provider without streaming uses chat",
@@ -329,14 +329,14 @@ func TestConfiguredStreamingEligibilityGates(t *testing.T) {
 			wantChatCalls:    1,
 		},
 		{
-			name:              "multi candidate fallback uses chat",
+			name:              "multi candidate fallback streams primary candidate",
 			channel:           "pico",
 			channelStreaming:  true,
 			modelStreaming:    true,
 			fallbacks:         []string{"fallback-model"},
 			streamingProvider: true,
 			streamDelegate:    true,
-			wantChatCalls:     1,
+			wantStreamCalls:   1,
 		},
 		{
 			name:              "missing streamer uses chat",
@@ -468,6 +468,75 @@ func TestConfiguredStreamingVisibleSendResponseFalseRetainsFinalizedStreamMarker
 	}
 	if streamer.clearMarkers != 0 {
 		t.Fatalf("clear markers = %d, want 0", streamer.clearMarkers)
+	}
+}
+
+func TestConfiguredStreamingVisibleSendResponseTrueDoesNotPublishDuplicateOutbound(t *testing.T) {
+	cfg := newConfiguredStreamingTestConfig(t, true, true, nil)
+	streamer := &recordingStreamer{}
+	msgBus := bus.NewMessageBus()
+	msgBus.SetStreamDelegate(configuredStreamingDelegate{streamer: streamer})
+	provider := &configuredStreamingProvider{
+		streamPlan: []configuredStreamingCall{{
+			chunks:   []string{"visible stream"},
+			response: &providers.LLMResponse{Content: "stream response"},
+		}},
+	}
+	al := NewAgentLoop(cfg, msgBus, provider)
+	opts := configuredStreamingProcessOptions("pico")
+	opts.SendResponse = true
+
+	got, err := al.runAgentLoop(context.Background(), al.GetRegistry().GetDefaultAgent(), opts)
+	if err != nil {
+		t.Fatalf("runAgentLoop() error = %v", err)
+	}
+	if got != "stream response" {
+		t.Fatalf("response = %q, want stream response", got)
+	}
+	if len(streamer.updates) != 1 || streamer.updates[0] != "visible stream" {
+		t.Fatalf("stream updates = %v, want [visible stream]", streamer.updates)
+	}
+	if len(streamer.finalized) != 1 || streamer.finalized[0] != "stream response" {
+		t.Fatalf("stream finalized = %v, want [stream response]", streamer.finalized)
+	}
+	select {
+	case outbound := <-msgBus.OutboundChan():
+		t.Fatalf("unexpected duplicate outbound after visible streaming response: %#v", outbound)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+func TestConfiguredStreamingFinalOnlySendResponseTrueDoesNotPublishDuplicateOutbound(t *testing.T) {
+	cfg := newConfiguredStreamingTestConfig(t, true, true, nil)
+	streamer := &recordingStreamer{}
+	msgBus := bus.NewMessageBus()
+	msgBus.SetStreamDelegate(configuredStreamingDelegate{streamer: streamer})
+	provider := &configuredStreamingProvider{
+		streamPlan: []configuredStreamingCall{{
+			response: &providers.LLMResponse{Content: "stream response"},
+		}},
+	}
+	al := NewAgentLoop(cfg, msgBus, provider)
+	opts := configuredStreamingProcessOptions("pico")
+	opts.SendResponse = true
+
+	got, err := al.runAgentLoop(context.Background(), al.GetRegistry().GetDefaultAgent(), opts)
+	if err != nil {
+		t.Fatalf("runAgentLoop() error = %v", err)
+	}
+	if got != "stream response" {
+		t.Fatalf("response = %q, want stream response", got)
+	}
+	if len(streamer.updates) != 0 {
+		t.Fatalf("stream updates = %v, want none", streamer.updates)
+	}
+	if len(streamer.finalized) != 1 || streamer.finalized[0] != "stream response" {
+		t.Fatalf("stream finalized = %v, want [stream response]", streamer.finalized)
+	}
+	select {
+	case outbound := <-msgBus.OutboundChan():
+		t.Fatalf("unexpected duplicate outbound after final-only streaming response: %#v", outbound)
+	case <-time.After(50 * time.Millisecond):
 	}
 }
 
@@ -775,10 +844,11 @@ func TestConfiguredStreamingBeforeLLMModelRewriteReevaluatesModelStreaming(t *te
 		wantFinalizedResponses int
 	}{
 		{
-			name:                  "rewrite to disabled model uses chat",
-			initialModelStreaming: true,
-			rewriteModel:          "hook-disabled-model",
-			wantChatCalls:         1,
+			name:                   "rewrite to disabled model still streams",
+			initialModelStreaming:  true,
+			rewriteModel:           "hook-disabled-model",
+			wantStreamCalls:        1,
+			wantFinalizedResponses: 1,
 		},
 		{
 			name:                   "rewrite to enabled model streams",

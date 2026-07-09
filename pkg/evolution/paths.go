@@ -1,8 +1,11 @@
 package evolution
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
+
+	pkgroot "github.com/sipeed/picoclaw/pkg"
 )
 
 type Paths struct {
@@ -19,7 +22,11 @@ type Paths struct {
 func NewPaths(workspace, override string) Paths {
 	root := strings.TrimSpace(override)
 	if root == "" {
-		root = filepath.Join(workspace, "state", "evolution")
+		if envStateDir := strings.TrimSpace(os.Getenv(pkgroot.StateDirEnv)); envStateDir != "" {
+			root = filepath.Join(expandHome(envStateDir), "evolution")
+		} else {
+			root = filepath.Join(workspace, "state", "evolution")
+		}
 	}
 
 	return Paths{
@@ -32,4 +39,18 @@ func NewPaths(workspace, override string) Paths {
 		ProfilesDir:     filepath.Join(root, "profiles"),
 		BackupsDir:      filepath.Join(root, "backups"),
 	}
+}
+
+func expandHome(path string) string {
+	if path == "" {
+		return path
+	}
+	if path[0] == '~' {
+		home, _ := os.UserHomeDir()
+		if len(path) > 1 && path[1] == '/' {
+			return home + path[1:]
+		}
+		return home
+	}
+	return path
 }

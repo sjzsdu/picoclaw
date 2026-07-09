@@ -6,7 +6,6 @@ const ScopeVersionV1 = 1
 // SessionScope describes the semantic session partition selected for a turn.
 type SessionScope struct {
 	Version    int               `json:"version"`
-	AgentID    string            `json:"agent_id"`
 	Channel    string            `json:"channel"`
 	Account    string            `json:"account"`
 	Dimensions []string          `json:"dimensions"`

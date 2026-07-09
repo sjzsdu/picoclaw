@@ -9,4 +9,7 @@ const (
 
 	DefaultPicoClawHome = ".picoclaw"
 	WorkspaceName       = "workspace"
+	SessionsDirEnv      = "PICOCLAW_SESSIONS_DIR"
+	MemoryDirEnv        = "PICOCLAW_MEMORY_DIR"
+	StateDirEnv         = "PICOCLAW_STATE_DIR"
 )

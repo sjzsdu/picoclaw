@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
+	pkgroot "github.com/sipeed/picoclaw/pkg"
 	"github.com/sipeed/picoclaw/pkg/fileutil"
 	"github.com/sipeed/picoclaw/pkg/logger"
 )
@@ -35,7 +37,7 @@ type Manager struct {
 
 // NewManager creates a new state manager for the given workspace.
 func NewManager(workspace string) *Manager {
-	stateDir := filepath.Join(workspace, "state")
+	stateDir := resolveStateDir(workspace)
 	stateFile := filepath.Join(stateDir, "state.json")
 	oldStateFile := filepath.Join(workspace, "state.json")
 
@@ -80,6 +82,27 @@ func NewManager(workspace string) *Manager {
 	}
 
 	return sm
+}
+
+func resolveStateDir(workspace string) string {
+	if envDir := strings.TrimSpace(os.Getenv(pkgroot.StateDirEnv)); envDir != "" {
+		return expandHome(envDir)
+	}
+	return filepath.Join(workspace, "state")
+}
+
+func expandHome(path string) string {
+	if path == "" {
+		return path
+	}
+	if path[0] == '~' {
+		home, _ := os.UserHomeDir()
+		if len(path) > 1 && path[1] == '/' {
+			return home + path[1:]
+		}
+		return home
+	}
+	return path
 }
 
 // SetLastChannel atomically updates the last channel and saves the state.

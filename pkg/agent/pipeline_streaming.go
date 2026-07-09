@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -219,9 +220,9 @@ func finalizeConfiguredStreamingLLM(
 	exec *turnExecution,
 	content string,
 	contextUsage *bus.ContextUsage,
-) error {
+) (bool, error) {
 	if exec == nil || exec.streamingPublisher == nil {
-		return nil
+		return false, nil
 	}
 	publisher := exec.streamingPublisher
 	exec.streamingPublisher = nil
@@ -234,7 +235,7 @@ func finalizeConfiguredStreamingLLM(
 				"model":    exec.llmModel,
 				"error":    err.Error(),
 			})
-			return configuredStreamingVisibleError{err: err}
+			return visibleBeforeFinalize, configuredStreamingVisibleError{err: err}
 		}
 		publisher.Cancel(ctx)
 		logger.WarnCF("agent", "stream final flush failed", map[string]any{
@@ -243,9 +244,9 @@ func finalizeConfiguredStreamingLLM(
 			"model":    exec.llmModel,
 			"error":    err.Error(),
 		})
-		return err
+		return false, err
 	}
-	return nil
+	return publisher.Published(), nil
 }
 
 func cancelConfiguredStreamingLLM(ctx context.Context, exec *turnExecution) {
@@ -284,34 +285,6 @@ func (p *Pipeline) configuredStreamingEligible(ts *turnState, exec *turnExecutio
 		})
 		return false
 	}
-	if len(exec.activeCandidates) != 1 {
-		logger.DebugCF("agent", "configured streaming not used", map[string]any{
-			"agent_id":   ts.agent.ID,
-			"channel":    ts.channel,
-			"model":      exec.activeModel,
-			"candidates": len(exec.activeCandidates),
-			"reason":     "fallback_candidates_enabled",
-		})
-		return false
-	}
-	if exec.activeModelConfig == nil || !exec.activeModelConfig.Streaming.Enabled {
-		modelName := ""
-		modelStreaming := false
-		if exec.activeModelConfig != nil {
-			modelName = exec.activeModelConfig.ModelName
-			modelStreaming = exec.activeModelConfig.Streaming.Enabled
-		}
-		logger.DebugCF("agent", "configured streaming not used", map[string]any{
-			"agent_id":         ts.agent.ID,
-			"channel":          ts.channel,
-			"model":            exec.activeModel,
-			"model_name":       modelName,
-			"model_streaming":  modelStreaming,
-			"has_model_config": exec.activeModelConfig != nil,
-			"reason":           "model_streaming_disabled",
-		})
-		return false
-	}
 	channelStreaming, ok := p.channelStreamingConfig(ts.channel)
 	if !ok || !channelStreaming.Enabled {
 		logger.DebugCF("agent", "configured streaming not used", map[string]any{
@@ -343,7 +316,24 @@ func (p *Pipeline) channelStreamingConfig(channelName string) (config.StreamingC
 		})
 		return config.StreamingConfig{}, false
 	}
-	return streamingConfigFromDecodedSettings(decoded)
+	streaming, ok := streamingConfigFromDecodedSettings(decoded)
+	if strings.EqualFold(strings.TrimSpace(channelName), config.ChannelPico) && !p.channelHasExplicitStreamingConfig(ch) {
+		streaming.Enabled = true
+		ok = true
+	}
+	return streaming, ok
+}
+
+func (p *Pipeline) channelHasExplicitStreamingConfig(ch *config.Channel) bool {
+	if ch == nil || len(ch.Settings) == 0 {
+		return false
+	}
+	var settings map[string]any
+	if err := json.Unmarshal(ch.Settings, &settings); err != nil {
+		return false
+	}
+	_, ok := settings["streaming"]
+	return ok
 }
 
 func streamingConfigFromDecodedSettings(decoded any) (config.StreamingConfig, bool) {

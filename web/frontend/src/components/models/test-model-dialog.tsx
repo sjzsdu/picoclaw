@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next"
 import {
   type ModelInfo,
   type TestModelInlineRequest,
+  type TestModelResponse,
   testModel,
   testModelInline,
 } from "@/api/models"
@@ -41,6 +42,16 @@ interface TestResult {
   error?: string
 }
 
+function normalizeTestResult(response: TestModelResponse): TestResult {
+  const success = response.success ?? (response.status === "ok" && response.available !== false)
+  return {
+    success,
+    latency_ms: response.latency_ms ?? 0,
+    status: response.status,
+    error: response.error || response.message || response.reason,
+  }
+}
+
 export function TestModelDialog({
   model,
   open,
@@ -55,7 +66,7 @@ export function TestModelDialog({
     setTesting(true)
     setResult(null)
     try {
-      let res: TestResult
+      let res: TestModelResponse
       if (inlineParams) {
         const req: TestModelInlineRequest = {
           provider: inlineParams.provider,
@@ -71,7 +82,7 @@ export function TestModelDialog({
       } else {
         return
       }
-      setResult(res)
+      setResult(normalizeTestResult(res))
     } catch (e) {
       setResult({
         success: false,

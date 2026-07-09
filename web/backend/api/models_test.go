@@ -64,6 +64,30 @@ func addModelAndLoadLatest(t *testing.T, configPath string, body string) *config
 	return cfg.ModelList[len(cfg.ModelList)-1]
 }
 
+func TestHandleTestModel_DoesNotIncludeToolsByDefault(t *testing.T) {
+	if modelTestShouldIncludeTools(&config.ModelConfig{}, nil) {
+		t.Fatal("modelTestShouldIncludeTools(nil include_tools) = true, want false")
+	}
+}
+
+func TestHandleTestModel_HonorsExplicitIncludeTools(t *testing.T) {
+	if !modelTestShouldIncludeTools(&config.ModelConfig{}, boolPtr(true)) {
+		t.Fatal("modelTestShouldIncludeTools(include_tools=true) = false, want true")
+	}
+	if modelTestShouldIncludeTools(&config.ModelConfig{}, boolPtr(false)) {
+		t.Fatal("modelTestShouldIncludeTools(include_tools=false) = true, want false")
+	}
+}
+
+func TestHandleTestModel_DefaultIgnoresDisableToolsFlag(t *testing.T) {
+	if modelTestShouldIncludeTools(&config.ModelConfig{DisableTools: false}, nil) {
+		t.Fatal("modelTestShouldIncludeTools(default) = true, want false even when tools are enabled")
+	}
+	if modelTestShouldIncludeTools(&config.ModelConfig{DisableTools: true}, nil) {
+		t.Fatal("modelTestShouldIncludeTools(default) = true, want false when tools are disabled")
+	}
+}
+
 func TestHandleListModels_AvailabilityUsesRuntimeProbesForLocalModels(t *testing.T) {
 	configPath, cleanup := setupOAuthTestEnv(t)
 	defer cleanup()

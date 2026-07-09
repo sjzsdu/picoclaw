@@ -1,13 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { useTranslation } from "react-i18next"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
 
-import { type ModelInfo, getModels, setDefaultModel } from "@/api/models"
-import { showSaveSuccessOrRestartToast } from "@/lib/restart-required"
-import { refreshGatewayState } from "@/store/gateway"
+import { type ModelInfo, getModels } from "@/api/models"
 
 interface UseChatModelsOptions {
   isConnected: boolean
+  activeSessionId?: string
 }
 
 function isLocalModel(model: ModelInfo): boolean {
@@ -21,11 +19,28 @@ function isLocalModel(model: ModelInfo): boolean {
   )
 }
 
-export function useChatModels({ isConnected }: UseChatModelsOptions) {
-  const { t } = useTranslation()
+export function useChatModels({
+  isConnected,
+  activeSessionId,
+}: UseChatModelsOptions) {
   const [modelList, setModelList] = useState<ModelInfo[]>([])
   const [defaultModelName, setDefaultModelName] = useState("")
-  const setDefaultRequestIdRef = useRef(0)
+  const [sessionModelNames, setSessionModelNames] = useState<Record<string, string>>(
+    {},
+  )
+  const [loadError, setLoadError] = useState<string | null>(null)
+
+  const sessionModelName = activeSessionId
+    ? (sessionModelNames[activeSessionId] ?? "")
+    : ""
+
+  const selectedModelName = useMemo(() => {
+    const preferredModelName = sessionModelName || defaultModelName
+    if (modelList.some((model) => model.model_name === preferredModelName)) {
+      return preferredModelName
+    }
+    return ""
+  }, [defaultModelName, modelList, sessionModelName])
 
   const syncDefaultModelName = useCallback(
     (models: ModelInfo[], defaultModel: string) => {
@@ -40,11 +55,17 @@ export function useChatModels({ isConnected }: UseChatModelsOptions) {
 
   const loadModels = useCallback(async () => {
     try {
+      setLoadError(null)
       const data = await getModels()
       setModelList(data.models)
       syncDefaultModelName(data.models, data.default_model)
-    } catch {
-      // silently fail
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unknown error"
+      console.error("Failed to load models:", msg)
+      setLoadError(msg)
+      toast.error(
+        "Failed to load models. Please check your connection and refresh.",
+      )
     }
   }, [syncDefaultModelName])
 
@@ -54,35 +75,17 @@ export function useChatModels({ isConnected }: UseChatModelsOptions) {
     }, 0)
 
     return () => clearTimeout(timerId)
-  }, [isConnected, loadModels])
+  }, [isConnected, activeSessionId, loadModels])
 
-  const handleSetDefault = useCallback(
-    async (modelName: string) => {
-      if (modelName === defaultModelName) return
-      const requestId = ++setDefaultRequestIdRef.current
-
-      try {
-        await setDefaultModel(modelName)
-        const data = await getModels()
-        if (requestId !== setDefaultRequestIdRef.current) {
-          return
-        }
-
-        setModelList(data.models)
-        syncDefaultModelName(data.models, data.default_model)
-        const gateway = await refreshGatewayState({ force: true })
-        showSaveSuccessOrRestartToast(
-          t,
-          t("models.defaultChangeSuccess"),
-          modelName,
-          gateway?.restartRequired === true,
-        )
-      } catch (err) {
-        console.error("Failed to set default model:", err)
-        toast.error(err instanceof Error ? err.message : t("models.loadError"))
-      }
+  const handleSelectModel = useCallback(
+    (modelName: string) => {
+      if (!activeSessionId || modelName === selectedModelName) return
+      setSessionModelNames((prev) => ({
+        ...prev,
+        [activeSessionId]: modelName,
+      }))
     },
-    [defaultModelName, syncDefaultModelName, t],
+    [activeSessionId, selectedModelName],
   )
 
   const defaultSelectableModels = useMemo(
@@ -121,10 +124,12 @@ export function useChatModels({ isConnected }: UseChatModelsOptions) {
 
   return {
     defaultModelName,
+    selectedModelName,
     hasAvailableModels,
     apiKeyModels,
     oauthModels,
     localModels,
-    handleSetDefault,
+    handleSelectModel,
+    loadError,
   }
 }

@@ -23,12 +23,18 @@ export interface ModelInfo {
   streaming?: {
     enabled?: boolean
   }
+  disable_tools?: boolean
   extra_body?: Record<string, unknown>
   custom_headers?: Record<string, string>
   // Meta
   enabled: boolean
   available: boolean
   status: "available" | "unconfigured" | "unreachable"
+  status_reason?: string
+  last_test_status?: string
+  last_test_reason?: string
+  last_test_message?: string
+  last_tested_at_unix?: number
   is_default: boolean
   is_virtual: boolean
   default_model_allowed?: boolean
@@ -63,6 +69,49 @@ interface ModelActionResponse {
   status: string
   index?: number
   default_model?: string
+}
+
+export interface ModelTestResponse {
+  status: string
+  message?: string
+  available?: boolean
+  reason?: string
+}
+
+export interface ModelBatchTestResult {
+  index: number
+  model_name: string
+  available: boolean
+  status: "available" | "unreachable" | "unconfigured"
+  reason?: string
+  last_test_status?: string
+  last_test_reason?: string
+  last_test_message?: string
+  last_tested_at_unix?: number
+}
+
+export interface ModelBatchTestResponse {
+  status: string
+  results: ModelBatchTestResult[]
+}
+
+interface TestModelPayload {
+  model_name: string
+  model: string
+  api_base?: string
+  proxy?: string
+  auth_method?: string
+  connect_mode?: string
+  workspace?: string
+  rpm?: number
+  max_tokens_field?: string
+  request_timeout?: number
+  thinking_level?: string
+  disable_tools?: boolean
+  extra_body?: Record<string, unknown>
+  custom_headers?: Record<string, string>
+  index?: number
+  include_tools?: boolean
 }
 
 const BASE_URL = ""
@@ -126,16 +175,13 @@ export async function setDefaultModel(
 }
 
 export interface TestModelResponse {
-  success: boolean
-  latency_ms: number
+  success?: boolean
+  latency_ms?: number
   status: string
   error?: string
-}
-
-export async function testModel(index: number): Promise<TestModelResponse> {
-  return request<TestModelResponse>(`/api/models/${index}/test`, {
-    method: "POST",
-  })
+  message?: string
+  available?: boolean
+  reason?: string
 }
 
 export interface TestModelInlineRequest {
@@ -145,16 +191,6 @@ export interface TestModelInlineRequest {
   api_key?: string
   auth_method?: string
   model_index?: number
-}
-
-export async function testModelInline(
-  params: TestModelInlineRequest,
-): Promise<TestModelResponse> {
-  return request<TestModelResponse>("/api/models/test-inline", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(params),
-  })
 }
 
 export interface UpstreamModel {
@@ -220,4 +256,41 @@ export async function deleteCatalog(id: string): Promise<void> {
   )
 }
 
+export async function testModel(index: number): Promise<TestModelResponse>
+export async function testModel(model: TestModelPayload): Promise<TestModelResponse>
+export async function testModel(
+  indexOrModel: number | TestModelPayload,
+): Promise<TestModelResponse> {
+  if (typeof indexOrModel === "number") {
+    return request<TestModelResponse>(`/api/models/${indexOrModel}/test`, {
+      method: "POST",
+    })
+  }
+
+  return request<TestModelResponse>("/api/models/test", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(indexOrModel),
+  })
+}
+
+export async function testModelInline(
+  params: TestModelInlineRequest,
+): Promise<TestModelResponse> {
+  return request<TestModelResponse>("/api/models/test-inline", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  })
+}
+
+export async function testAllModels(
+  providerKey?: string,
+): Promise<ModelBatchTestResponse> {
+  return request<ModelBatchTestResponse>("/api/models/test-all", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(providerKey ? { provider_key: providerKey } : {}),
+  })
+}
 export type { ModelsListResponse, ModelActionResponse }

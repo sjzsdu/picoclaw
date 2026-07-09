@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	pkgroot "github.com/sipeed/picoclaw/pkg"
 	"github.com/sipeed/picoclaw/pkg/fileutil"
 )
 
@@ -28,7 +29,7 @@ type MemoryStore struct {
 // NewMemoryStore creates a new MemoryStore with the given workspace path.
 // It ensures the memory directory exists.
 func NewMemoryStore(workspace string) *MemoryStore {
-	memoryDir := filepath.Join(workspace, "memory")
+	memoryDir := resolveMemoryDir(workspace)
 	memoryFile := filepath.Join(memoryDir, "MEMORY.md")
 
 	// Ensure memory directory exists
@@ -39,6 +40,13 @@ func NewMemoryStore(workspace string) *MemoryStore {
 		memoryDir:  memoryDir,
 		memoryFile: memoryFile,
 	}
+}
+
+func resolveMemoryDir(workspace string) string {
+	if envDir := strings.TrimSpace(os.Getenv(pkgroot.MemoryDirEnv)); envDir != "" {
+		return expandHome(envDir)
+	}
+	return filepath.Join(workspace, "memory")
 }
 
 // getTodayFile returns the path to today's daily note file (memory/YYYYMM/YYYYMMDD.md).

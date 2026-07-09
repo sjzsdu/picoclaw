@@ -8,10 +8,7 @@ import {
   assistantDetailVisibilityStorage,
   shouldShowAssistantMessage,
 } from "@/features/chat/detail-visibility"
-import {
-  getInitialActiveSessionId,
-  writeStoredSessionId,
-} from "@/features/chat/state"
+import { getInitialActiveSessionId } from "@/features/chat/state"
 
 export interface ChatAttachment {
   type: "image" | "audio" | "video" | "file"
@@ -38,15 +35,21 @@ export interface ChatToolCall {
 
 export type AssistantMessageKind = "normal" | "thought" | "tool_calls"
 
+export type MessageDeliveryStatus = "sending" | "sent" | "delivered" | "failed"
+
 export interface ChatMessage {
   id: string
   role: "user" | "assistant"
   content: string
   timestamp: number | string
+  reasoningContent?: string
   kind?: AssistantMessageKind
   modelName?: string
   attachments?: ChatAttachment[]
   toolCalls?: ChatToolCall[]
+  agentId?: string
+  deliveryStatus?: MessageDeliveryStatus
+  isStreaming?: boolean
 }
 
 export interface ContextUsage {
@@ -64,6 +67,15 @@ export type ConnectionState =
   | "connected"
   | "error"
 
+export interface TabState {
+  sessionId: string
+  messages: ChatMessage[]
+  isTyping: boolean
+  contextUsage?: ContextUsage
+  hasHydrated: boolean
+  title?: string
+}
+
 export interface ChatStoreState {
   messages: ChatMessage[]
   connectionState: ConnectionState
@@ -71,9 +83,25 @@ export interface ChatStoreState {
   activeSessionId: string
   hasHydratedActiveSession: boolean
   contextUsage?: ContextUsage
+  /** Ordered list of open tabs */
+  tabs: TabState[]
+  /** Index of the currently active tab */
+  activeTabIndex: number
 }
 
 type ChatStorePatch = Partial<ChatStoreState>
+
+function buildInitialTabs(): TabState[] {
+  const sessionId = getInitialActiveSessionId()
+  return [
+    {
+      sessionId,
+      messages: [],
+      isTyping: false,
+      hasHydrated: false,
+    },
+  ]
+}
 
 const DEFAULT_CHAT_STATE: ChatStoreState = {
   messages: [],
@@ -81,6 +109,8 @@ const DEFAULT_CHAT_STATE: ChatStoreState = {
   isTyping: false,
   activeSessionId: getInitialActiveSessionId(),
   hasHydratedActiveSession: false,
+  tabs: buildInitialTabs(),
+  activeTabIndex: 0,
 }
 
 export const chatAtom = atom<ChatStoreState>(DEFAULT_CHAT_STATE)
@@ -108,15 +138,92 @@ export function updateChatStore(
 ) {
   store.set(chatAtom, (prev) => {
     const nextPatch = typeof patch === "function" ? patch(prev) : patch
-    const next = { ...prev, ...nextPatch }
+    const result = { ...prev, ...nextPatch }
 
-    if (next.activeSessionId !== prev.activeSessionId) {
-      writeStoredSessionId(next.activeSessionId)
+    // Sync legacy fields (messages, isTyping, contextUsage, activeSessionId)
+    // to the active tab when tabs are present
+    if (result.tabs.length > 0 && result.activeTabIndex < result.tabs.length) {
+      const activeTab = result.tabs[result.activeTabIndex]
+      let tabNeedsUpdate = false
+
+      if ("messages" in nextPatch && result.messages !== activeTab.messages) {
+        tabNeedsUpdate = true
+      }
+      if ("isTyping" in nextPatch && result.isTyping !== activeTab.isTyping) {
+        tabNeedsUpdate = true
+      }
+      if ("contextUsage" in nextPatch && result.contextUsage !== activeTab.contextUsage) {
+        tabNeedsUpdate = true
+      }
+
+      if (tabNeedsUpdate) {
+        const updatedTab = {
+          ...activeTab,
+          ...("messages" in nextPatch ? { messages: result.messages } : {}),
+          ...("isTyping" in nextPatch ? { isTyping: result.isTyping } : {}),
+          ...("contextUsage" in nextPatch ? { contextUsage: result.contextUsage } : {}),
+        }
+        const newTabs = [...result.tabs]
+        newTabs[result.activeTabIndex] = updatedTab
+        result.tabs = newTabs
+      }
     }
 
-    return next
+    return result
   })
 }
 
-export { shouldShowAssistantMessage, DEFAULT_ASSISTANT_DETAIL_VISIBILITY }
+/**
+ * Update only the active tab's state without touching the top-level
+ * messages/isTyping/contextUsage. Used by the tab system and protocol handler.
+ */
+export function updateActiveTabState(
+  patch:
+    | Partial<TabState>
+    | ((prev: TabState) => Partial<TabState>),
+) {
+  store.set(chatAtom, (prev) => {
+    const tabIndex = prev.activeTabIndex
+    if (tabIndex < 0 || tabIndex >= prev.tabs.length) {
+      return prev
+    }
+    const tab = { ...prev.tabs[tabIndex] }
+    const nextPatch = typeof patch === "function" ? patch(tab) : patch
+    const updatedTab = { ...tab, ...nextPatch }
+    const newTabs = [...prev.tabs]
+    newTabs[tabIndex] = updatedTab
+
+    // Sync to top-level fields for backward compatibility,
+    // but only if the relevant fields actually changed
+    const result: Partial<ChatStoreState> = { tabs: newTabs }
+    if ("messages" in nextPatch && updatedTab.messages !== prev.messages) {
+      result.messages = updatedTab.messages
+    }
+    if ("isTyping" in nextPatch && updatedTab.isTyping !== prev.isTyping) {
+      result.isTyping = updatedTab.isTyping
+    }
+    if ("contextUsage" in nextPatch && updatedTab.contextUsage !== prev.contextUsage) {
+      result.contextUsage = updatedTab.contextUsage
+    }
+    if ("sessionId" in nextPatch && updatedTab.sessionId !== prev.activeSessionId) {
+      result.activeSessionId = updatedTab.sessionId
+    }
+
+    return { ...prev, ...result }
+  })
+}
+
+/** Get the active tab's state directly */
+export function getActiveTabState(): TabState | undefined {
+  const state = getChatState()
+  if (state.activeTabIndex < 0 || state.activeTabIndex >= state.tabs.length) {
+    return undefined
+  }
+  return state.tabs[state.activeTabIndex]
+}
+
+export {
+  shouldShowAssistantMessage,
+  DEFAULT_ASSISTANT_DETAIL_VISIBILITY,
+}
 export type { AssistantDetailVisibility }

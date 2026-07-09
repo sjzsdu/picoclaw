@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"os"
+	"runtime"
 	"strings"
 
 	"github.com/sipeed/picoclaw/pkg/logger"
@@ -12,10 +13,28 @@ import (
 const DefaultGatewayLogLevel = "warn"
 
 type GatewayConfig struct {
-	Host      string `json:"host"                env:"PICOCLAW_GATEWAY_HOST"`
-	Port      int    `json:"port"                env:"PICOCLAW_GATEWAY_PORT"`
-	HotReload bool   `json:"hot_reload"          env:"PICOCLAW_GATEWAY_HOT_RELOAD"`
-	LogLevel  string `json:"log_level,omitempty" env:"PICOCLAW_LOG_LEVEL"`
+	Host          string `json:"host"                env:"PICOCLAW_GATEWAY_HOST"`
+	Port          int    `json:"port"                env:"PICOCLAW_GATEWAY_PORT"`
+	HotReload     bool   `json:"hot_reload"          env:"PICOCLAW_GATEWAY_HOT_RELOAD"`
+	LogLevel      string `json:"log_level,omitempty" env:"PICOCLAW_LOG_LEVEL"`
+	WorkerCount   int    `json:"worker_count,omitempty"         env:"PICOCLAW_GATEWAY_WORKER_COUNT"`
+	InboundBuffer int    `json:"inbound_buffer,omitempty"       env:"PICOCLAW_GATEWAY_INBOUND_BUFFER"`
+}
+
+// GetWorkerCount returns the configured worker count, or runtime.NumCPU() if not set.
+func (g *GatewayConfig) GetWorkerCount() int {
+	if g.WorkerCount <= 0 {
+		return runtime.NumCPU()
+	}
+	return g.WorkerCount
+}
+
+// GetInboundBuffer returns the configured inbound buffer size, or 64 if not set.
+func (g *GatewayConfig) GetInboundBuffer() int {
+	if g.InboundBuffer <= 0 {
+		return 64
+	}
+	return g.InboundBuffer
 }
 
 func canonicalGatewayLogLevel(level logger.LogLevel) string {

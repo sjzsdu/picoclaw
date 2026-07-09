@@ -46,7 +46,6 @@ func outboundScopeFromSessionScope(scope *session.SessionScope) *bus.OutboundSco
 	}
 	outboundScope := &bus.OutboundScope{
 		Version: scope.Version,
-		AgentID: scope.AgentID,
 		Channel: scope.Channel,
 		Account: scope.Account,
 	}
@@ -301,9 +300,6 @@ func appendEventContextFields(fields map[string]any, turnCtx *TurnContext) {
 	if scope := turnCtx.Scope; scope != nil {
 		if scope.Version > 0 {
 			fields["scope_version"] = scope.Version
-		}
-		if scope.AgentID != "" {
-			fields["scope_agent_id"] = scope.AgentID
 		}
 		if scope.Channel != "" {
 			fields["scope_channel"] = scope.Channel

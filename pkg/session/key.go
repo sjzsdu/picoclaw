@@ -70,8 +70,8 @@ func ResolveAgentID(store any, sessionKey string) string {
 		GetSessionScope(sessionKey string) *SessionScope
 	}); ok {
 		scope := scopeReader.GetSessionScope(sessionKey)
-		if scope != nil && strings.TrimSpace(scope.AgentID) != "" {
-			return routing.NormalizeAgentID(scope.AgentID)
+		if scope != nil && len(scope.Dimensions) > 0 {
+			return routing.DefaultAgentID
 		}
 	}
 
@@ -79,7 +79,7 @@ func ResolveAgentID(store any, sessionKey string) string {
 		return routing.NormalizeAgentID(parsed.AgentID)
 	}
 
-	return ""
+	return routing.DefaultAgentID
 }
 
 func BuildLegacyMainAlias(agentID string) string {
@@ -184,7 +184,6 @@ func resolveLinkedPeerID(identityLinks map[string][]string, channel, peerID stri
 func CanonicalScopeSignature(scope SessionScope) string {
 	parts := []string{
 		fmt.Sprintf("v=%d", scope.Version),
-		fmt.Sprintf("agent=%s", strings.TrimSpace(strings.ToLower(scope.AgentID))),
 		fmt.Sprintf("channel=%s", strings.TrimSpace(strings.ToLower(scope.Channel))),
 		fmt.Sprintf("account=%s", strings.TrimSpace(strings.ToLower(scope.Account))),
 	}

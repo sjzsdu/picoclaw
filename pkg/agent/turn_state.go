@@ -83,10 +83,11 @@ const (
 // =============================================================================
 
 type turnResult struct {
-	finalContent string
-	modelName    string
-	status       TurnEndStatus
-	followUps    []bus.InboundMessage
+	finalContent      string
+	modelName         string
+	status            TurnEndStatus
+	followUps         []bus.InboundMessage
+	responseDelivered bool
 }
 
 // =============================================================================
@@ -121,7 +122,10 @@ type turnExecution struct {
 	currentTurnStart int
 
 	// Turn output
-	finalContent string
+	finalContent               string
+	publishedPicoReasoning     bool
+	publishedPicoVisibleOutput bool
+	pendingPicoInterimContent  string
 
 	// Iteration tracking
 	iteration int

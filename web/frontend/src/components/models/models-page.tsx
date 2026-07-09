@@ -13,6 +13,8 @@ import {
   type ModelProviderOption,
   getModels,
   setDefaultModel,
+  testAllModels,
+  testModel,
 } from "@/api/models"
 import { PageHeader } from "@/components/page-header"
 import { Button } from "@/components/ui/button"
@@ -55,6 +57,10 @@ export function ModelsPage() {
     null,
   )
   const providerMap = getProviderCatalogMap(providerOptions)
+  const [testingIndex, setTestingIndex] = useState<number | null>(null)
+  const [testingProviderKey, setTestingProviderKey] = useState<string | null>(
+    null,
+  )
 
   const fetchModels = useCallback(async () => {
     setLoading(true)
@@ -102,9 +108,57 @@ export function ModelsPage() {
     }
   }
 
+  const handleTestModel = async (model: ModelInfo) => {
+    if (model.is_virtual) return
+
+    setTestingIndex(model.index)
+    try {
+      await testModel({
+        index: model.index,
+        model_name: model.model_name,
+        model: model.model,
+        api_base: model.api_base,
+        proxy: model.proxy,
+        auth_method: model.auth_method,
+        connect_mode: model.connect_mode,
+        workspace: model.workspace,
+        rpm: model.rpm,
+        max_tokens_field: model.max_tokens_field,
+        request_timeout: model.request_timeout,
+        thinking_level: model.thinking_level,
+        disable_tools: model.disable_tools,
+        extra_body: model.extra_body,
+        custom_headers: model.custom_headers,
+      })
+    } catch {
+      // ignore and rely on refreshed persisted status below
+    } finally {
+      await fetchModels()
+      setTestingIndex(null)
+    }
+  }
+
+  const handleTestProvider = async (providerKey: string) => {
+    setTestingProviderKey(providerKey)
+    try {
+      await testAllModels(providerKey)
+    } catch {
+      // ignore and rely on refreshed persisted status below
+    } finally {
+      await fetchModels()
+      setTestingProviderKey(null)
+    }
+  }
+
   const grouped: Record<
     string,
-    { provider: Pick<ProviderCatalogEntry, "key" | "label" | "iconSlug" | "domain">; models: ModelInfo[] }
+    {
+      provider: Pick<
+        ProviderCatalogEntry,
+        "key" | "label" | "iconSlug" | "domain"
+      >
+      models: ModelInfo[]
+    }
   > = {}
   for (const model of models) {
     const providerKey = getCanonicalProviderKey(model.provider, providerOptions)
@@ -172,7 +226,7 @@ export function ModelsPage() {
             size="sm"
             variant="outline"
             onClick={() => setAddOpen(true)}
-            disabled={providerOptions.length === 0}
+            disabled={loading || providerOptions.length === 0}
           >
             <IconPlus className="size-4" />
             {t("models.add.button")}
@@ -230,8 +284,12 @@ export function ModelsPage() {
                 provider={providerGroup.provider}
                 models={providerGroup.models}
                 onEdit={setEditingModel}
+                onTest={handleTestModel}
+                onTestAll={handleTestProvider}
                 onSetDefault={handleSetDefault}
                 onDelete={setDeletingModel}
+                testingIndex={testingIndex}
+                testingAll={testingProviderKey === providerGroup.key}
                 settingDefaultIndex={settingDefaultIndex}
               />
             ))}

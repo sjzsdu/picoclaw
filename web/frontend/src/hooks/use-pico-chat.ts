@@ -2,11 +2,14 @@ import dayjs from "dayjs"
 import { useAtomValue } from "jotai"
 
 import {
+  closeTab,
   newChatSession,
+  reorderTabs,
   sendChatMessage,
   switchChatSession,
+  switchToTab,
 } from "@/features/chat/controller"
-import { chatAtom } from "@/store/chat"
+import { type TabState, chatAtom } from "@/store/chat"
 
 const UNIX_MS_THRESHOLD = 1e12
 
@@ -55,7 +58,7 @@ export function formatMessageTime(dateRaw: number | string | Date): string {
 }
 
 export function usePicoChat() {
-  const { messages, connectionState, isTyping, activeSessionId, contextUsage } =
+  const { messages, connectionState, isTyping, activeSessionId, contextUsage, tabs, activeTabIndex } =
     useAtomValue(chatAtom)
 
   return {
@@ -64,8 +67,15 @@ export function usePicoChat() {
     isTyping,
     activeSessionId,
     contextUsage,
+    tabs,
+    activeTabIndex,
     sendMessage: sendChatMessage,
     switchSession: switchChatSession,
     newChat: newChatSession,
+    closeTab,
+    switchToTab,
+    reorderTabs,
   }
 }
+
+export type { TabState }

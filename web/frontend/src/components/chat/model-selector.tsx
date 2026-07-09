@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/select"
 
 interface ModelSelectorProps {
-  defaultModelName: string
+  selectedModelName: string
   apiKeyModels: ModelInfo[]
   oauthModels: ModelInfo[]
   localModels: ModelInfo[]
@@ -21,7 +21,7 @@ interface ModelSelectorProps {
 }
 
 export function ModelSelector({
-  defaultModelName,
+  selectedModelName,
   apiKeyModels,
   oauthModels,
   localModels,
@@ -30,7 +30,7 @@ export function ModelSelector({
   const { t } = useTranslation()
 
   return (
-    <Select value={defaultModelName} onValueChange={onValueChange}>
+    <Select value={selectedModelName} onValueChange={onValueChange}>
       <SelectTrigger
         size="sm"
         className="text-muted-foreground hover:text-foreground focus-visible:border-input h-8 max-w-[160px] min-w-[80px] bg-transparent shadow-none focus-visible:ring-0 sm:max-w-[220px]"

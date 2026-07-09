@@ -116,7 +116,7 @@ func (c *QQChannel) Start(ctx context.Context) error {
 		AppID:     c.config.AppID,
 		AppSecret: c.config.AppSecret.String(),
 	}
-	c.tokenSource = token.NewQQBotTokenSource(credentials)
+	c.tokenSource = newQQTokenSource(credentials.AppID, credentials.AppSecret, nil)
 
 	// create child context
 	c.ctx, c.cancel = context.WithCancel(ctx)

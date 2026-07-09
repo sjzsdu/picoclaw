@@ -385,6 +385,7 @@ func spawnSubTurn(
 		EnableSummary:           false,
 		SendResponse:            false,
 		NoHistory:               true, // SubTurns don't use session history
+		SkipSessionPersistence:  true,
 		SkipInitialSteeringPoll: true,
 	}
 	if !opts.TurnProfile.Enabled {
