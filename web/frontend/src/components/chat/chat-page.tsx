@@ -589,6 +589,7 @@ export function ChatPage() {
                         msg.agentId ? agentNameById.get(msg.agentId) : undefined
                       }
                       onQuickPrompt={handleQuickPrompt}
+                      isStreaming={msg.isStreaming}
                     />
                   ) : (
                     <UserMessage

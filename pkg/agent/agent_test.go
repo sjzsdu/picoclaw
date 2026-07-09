@@ -532,7 +532,6 @@ func TestProcessMessage_IncludesCurrentSenderInDynamicContext(t *testing.T) {
 	}
 }
 
-<<<<<<< HEAD
 func TestProcessMessage_DoesNotPassImplicitThinkingOffToCapableProvider(t *testing.T) {
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
@@ -725,23 +724,12 @@ func TestProcessMessage_BeforeLLMModelRewriteReevaluatesThinkingOff(t *testing.T
 			Defaults: config.AgentDefaults{
 				Workspace:         t.TempDir(),
 				ModelName:         "plain-model",
-=======
-func TestProcessMessage_IncludesRuntimeModelInDynamicContext(t *testing.T) {
-	tmpDir := t.TempDir()
-	cfg := &config.Config{
-		Agents: config.AgentsConfig{
-			Defaults: config.AgentDefaults{
-				Workspace:         tmpDir,
-				Provider:          "openai",
-				ModelName:         "gpt-friendly",
->>>>>>> 651babc0 (feat: optimize the chat and web)
 				MaxTokens:         4096,
 				MaxToolIterations: 10,
 			},
 		},
 		ModelList: []*config.ModelConfig{
 			{
-<<<<<<< HEAD
 				ModelName: "plain-model",
 				Model:     "openai/plain-model",
 			},
@@ -749,16 +737,11 @@ func TestProcessMessage_IncludesRuntimeModelInDynamicContext(t *testing.T) {
 				ModelName:     "off-model",
 				Model:         "openai/off-model",
 				ThinkingLevel: "off",
-=======
-				ModelName: "gpt-friendly",
-				Model:     "openai/gpt-5.4",
->>>>>>> 651babc0 (feat: optimize the chat and web)
 			},
 		},
 	}
 
 	msgBus := bus.NewMessageBus()
-<<<<<<< HEAD
 	provider := &reasoningOptionRecordingProvider{}
 	al := NewAgentLoop(cfg, msgBus, provider)
 	if err := al.MountHook(NamedHook("rewrite-model", modelRewriteHook{model: "off-model"})); err != nil {
@@ -1040,7 +1023,30 @@ func TestProcessMessage_BtwFallbackDoesNotInheritPrimaryThinkingOff(t *testing.T
 	}
 	if response != "thinking trace" {
 		t.Fatalf("processMessage() response = %q, want fallback reasoning when fallback has no off", response)
-=======
+	}
+}
+
+func TestProcessMessage_IncludesRuntimeModelInDynamicContext(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				Provider:          "openai",
+				ModelName:         "gpt-friendly",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+		},
+		ModelList: []*config.ModelConfig{
+			{
+				ModelName: "gpt-friendly",
+				Model:     "openai/gpt-5.4",
+			},
+		},
+	}
+
+	msgBus := bus.NewMessageBus()
 	provider := &recordingProvider{}
 	al := NewAgentLoop(cfg, msgBus, provider)
 
@@ -1133,7 +1139,6 @@ func TestProcessMessage_PicoModelNameOverridesSelectedAgentModel(t *testing.T) {
 	}
 	if stockAgent.Model != "gpt-5.4" {
 		t.Fatalf("stock agent model = %q, want gpt-5.4", stockAgent.Model)
->>>>>>> 651babc0 (feat: optimize the chat and web)
 	}
 }
 

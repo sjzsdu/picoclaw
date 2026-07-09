@@ -81,7 +81,7 @@ func (p *Pipeline) Finalize(
 	}
 
 	contextUsage := computeContextUsage(ts.agent, ts.sessionKey)
-	streamErr := finalizeConfiguredStreamingLLM(turnCtx, ts, exec, finalContent, contextUsage)
+	streamingDelivered, streamErr := finalizeConfiguredStreamingLLM(turnCtx, ts, exec, finalContent, contextUsage)
 	// If streaming never became visible, keep the legacy Pico interim publish path
 	// so the final answer is still delivered outside normal SendResponse.
 	if ((streamErr != nil && !isConfiguredStreamingVisibleError(streamErr)) || exec.streamingFallback) &&
@@ -96,16 +96,18 @@ func (p *Pipeline) Finalize(
 	if streamErr != nil && isConfiguredStreamingVisibleError(streamErr) {
 		ts.setPhase(TurnPhaseCompleted)
 		return turnResult{
-			finalContent: finalContent,
-			status:       TurnEndStatusError,
-			followUps:    append([]bus.InboundMessage(nil), ts.followUps...),
+			finalContent:      finalContent,
+			status:            TurnEndStatusError,
+			followUps:         append([]bus.InboundMessage(nil), ts.followUps...),
+			responseDelivered: streamingDelivered,
 		}, streamErr
 	}
 	ts.setPhase(TurnPhaseCompleted)
 	return turnResult{
-		finalContent: finalContent,
-		modelName:    exec.llmModelName,
-		status:       turnStatus,
-		followUps:    append([]bus.InboundMessage(nil), ts.followUps...),
+		finalContent:      finalContent,
+		modelName:         exec.llmModelName,
+		status:            turnStatus,
+		followUps:         append([]bus.InboundMessage(nil), ts.followUps...),
+		responseDelivered: streamingDelivered && streamErr == nil,
 	}, nil
 }

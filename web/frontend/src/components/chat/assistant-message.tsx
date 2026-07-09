@@ -89,6 +89,72 @@ interface AssistantMessageProps {
   agentId?: string
   agentName?: string
   onQuickPrompt?: (prompt: string) => void
+  isStreaming?: boolean
+}
+
+function splitIncompleteMarkdown(content: string): {
+  complete: string
+  incomplete: string
+} {
+  const blocks = content.split(/\n\n+/)
+  if (blocks.length <= 1) {
+    return { complete: "", incomplete: content }
+  }
+  const incomplete = blocks.pop() ?? ""
+  const complete = blocks.join("\n\n")
+  return { complete, incomplete }
+}
+
+function isIncompleteMarkdownBlock(text: string): boolean {
+  const trimmed = text.trimEnd()
+  if (/\*\*[^*]*$/.test(trimmed)) return true
+  if (/__[^_]*$/.test(trimmed)) return true
+  if (/\*[^*\n]*$/.test(trimmed) && !/^\*\s/.test(trimmed)) return true
+  if (/_[^_\n]*$/.test(trimmed) && !/^_\s/.test(trimmed)) return true
+  if (/`[^`]*$/.test(trimmed) && !/^`{3,}/.test(trimmed)) return true
+  if (/^#{1,6}\s+[^#]*$/.test(trimmed)) return true
+  if (/^[-*+]\s+\S/.test(trimmed) && !/\n\n/.test(trimmed)) return true
+  if (/^\d+\.\s+\S/.test(trimmed) && !/\n\n/.test(trimmed)) return true
+  if (/^>\s[^>]*$/.test(trimmed)) return true
+  if (/```[a-z]*$/.test(trimmed)) return true
+  return false
+}
+
+function StreamingMarkdown({ content }: { content: string }) {
+  const { complete, incomplete } = splitIncompleteMarkdown(content)
+  const hasIncomplete = incomplete.trimEnd().length > 0
+  const showAsPlainText =
+    hasIncomplete && isIncompleteMarkdownBlock(incomplete)
+
+  return (
+    <>
+      {complete && (
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm]}
+          rehypePlugins={[rehypeRaw, rehypeSanitize, rehypeHighlight]}
+          components={{
+            pre: MarkdownCodeBlock,
+          }}
+        >
+          {complete}
+        </ReactMarkdown>
+      )}
+      {hasIncomplete && showAsPlainText && (
+        <div className="whitespace-pre-wrap">{incomplete}</div>
+      )}
+      {hasIncomplete && !showAsPlainText && (
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm]}
+          rehypePlugins={[rehypeRaw, rehypeSanitize, rehypeHighlight]}
+          components={{
+            pre: MarkdownCodeBlock,
+          }}
+        >
+          {incomplete}
+        </ReactMarkdown>
+      )}
+    </>
+  )
 }
 
 export function AssistantMessage({
@@ -101,6 +167,7 @@ export function AssistantMessage({
   agentId,
   agentName,
   onQuickPrompt,
+  isStreaming = false,
 }: AssistantMessageProps) {
   const { t } = useTranslation()
   const { copy, isCopied } = useCopyToClipboard()
@@ -162,7 +229,7 @@ export function AssistantMessage({
               className={cn(
                 "flex w-full items-center justify-between px-3 py-2 text-left text-[12px] font-medium transition-colors select-none",
                 isThought
-                  ? "text-muted-foreground hover:text-foreground border-b border-amber-200/70 bg-amber-100/40 dark:border-amber-500/20 dark:bg-amber-500/5"
+                  ? "border-b border-amber-200/70 bg-amber-100/40 text-amber-900/80 hover:text-amber-950 dark:border-amber-500/20 dark:bg-amber-500/5 dark:text-amber-100/80 dark:hover:text-amber-50"
                   : "text-muted-foreground/60 hover:text-muted-foreground/80",
               )}
               onClick={() => setIsThoughtExpanded((value) => !value)}
@@ -182,7 +249,7 @@ export function AssistantMessage({
                     {collapsedLabel}
                   </div>
                   {isThought && (
-                    <div className="truncate text-[10px] opacity-70">
+                    <div className="truncate text-[10px] text-amber-800/70 dark:text-amber-100/60">
                       {isThoughtExpanded
                         ? "Internal reasoning details"
                         : "Preview hidden by default — expand to inspect"}
@@ -289,20 +356,20 @@ export function AssistantMessage({
                   : "prose-p:my-1.5 prose-p:whitespace-pre-wrap p-3 text-[14px] leading-normal",
               )}
             >
-              <ReactMarkdown
-                remarkPlugins={[remarkGfm]}
-                rehypePlugins={[rehypeRaw, rehypeSanitize, rehypeHighlight]}
-                components={{
-                  pre: MarkdownCodeBlock,
-                }}
-              >
-                {content}
-              </ReactMarkdown>
+              {isStreaming ? (
+                <StreamingMarkdown content={content} />
+              ) : (
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  rehypePlugins={[rehypeRaw, rehypeSanitize, rehypeHighlight]}
+                  components={{
+                    pre: MarkdownCodeBlock,
+                  }}
+                >
+                  {content}
+                </ReactMarkdown>
+              )}
             </div>
-          )}
-
-          {isThought && !isThoughtExpanded && (
-            <div className="pointer-events-none absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-amber-50 via-amber-50/95 to-transparent dark:from-amber-500/10 dark:via-amber-500/5" />
           )}
 
           {!isCollapsedBlock && hasText && (

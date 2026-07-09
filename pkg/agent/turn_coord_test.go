@@ -361,7 +361,6 @@ func TestPipeline_CallLLM_SimpleResponse(t *testing.T) {
 	}
 }
 
-<<<<<<< HEAD
 func TestPipeline_SetupTurn_ModelNameDoesNotUseFallbackAliasBeforeFallback(t *testing.T) {
 	al, agent, cleanup := newTurnCoordTestLoop(t, &simpleConvProvider{})
 	defer cleanup()
@@ -408,12 +407,6 @@ func TestPipeline_CallLLM_UsesSuccessfulFallbackIdentityAlias(t *testing.T) {
 	}
 	al.fallback = providers.NewFallbackChain(providers.NewCooldownTracker(), nil)
 
-=======
-func TestPipeline_CallLLM_DoesNotPromoteReasoningContentToFinalResponse(t *testing.T) {
-	al, agent, cleanup := newTurnCoordTestLoop(t, &reasoningOnlyProvider{})
-	defer cleanup()
-
->>>>>>> 651babc0 (feat: optimize the chat and web)
 	pipeline := NewPipeline(al)
 	ts := newTurnState(agent, makeTestProcessOpts("test-session"), turnEventScope{
 		turnID:  "turn-1",
@@ -432,7 +425,6 @@ func TestPipeline_CallLLM_DoesNotPromoteReasoningContentToFinalResponse(t *testi
 	if ctrl != ControlBreak {
 		t.Fatalf("expected ControlBreak, got %v", ctrl)
 	}
-<<<<<<< HEAD
 	if exec.llmModelName != "secondary" {
 		t.Fatalf("exec.llmModelName = %q, want %q", exec.llmModelName, "secondary")
 	}
@@ -512,7 +504,31 @@ func TestPipeline_SetupTurn_UsesLightCandidateDisplayName(t *testing.T) {
 	}
 	if exec.llmModelName != "light-model" {
 		t.Fatalf("exec.llmModelName = %q, want %q", exec.llmModelName, "light-model")
-=======
+	}
+}
+
+func TestPipeline_CallLLM_DoesNotPromoteReasoningContentToFinalResponse(t *testing.T) {
+	al, agent, cleanup := newTurnCoordTestLoop(t, &reasoningOnlyProvider{})
+	defer cleanup()
+
+	pipeline := NewPipeline(al)
+	ts := newTurnState(agent, makeTestProcessOpts("test-session"), turnEventScope{
+		turnID:  "turn-1",
+		context: newTurnContext(nil, nil, nil),
+	})
+
+	exec, err := pipeline.SetupTurn(context.Background(), ts)
+	if err != nil {
+		t.Fatalf("SetupTurn failed: %v", err)
+	}
+
+	ctrl, err := pipeline.CallLLM(context.Background(), context.Background(), ts, exec, 1)
+	if err != nil {
+		t.Fatalf("CallLLM failed: %v", err)
+	}
+	if ctrl != ControlBreak {
+		t.Fatalf("expected ControlBreak, got %v", ctrl)
+	}
 	if exec.response == nil {
 		t.Fatal("expected non-nil response")
 	}
@@ -521,7 +537,6 @@ func TestPipeline_SetupTurn_UsesLightCandidateDisplayName(t *testing.T) {
 	}
 	if exec.finalContent != "" {
 		t.Fatalf("expected empty finalContent, got %q", exec.finalContent)
->>>>>>> 651babc0 (feat: optimize the chat and web)
 	}
 }
 

@@ -625,7 +625,7 @@ func (s *picoStreamer) updateLocked(
 		}
 	}
 
-	return s.sendLocked(ctx, content, contextUsage)
+	return s.sendFinalLocked(ctx, content, contextUsage, force)
 }
 
 func (s *picoStreamer) updateReasoningLocked(ctx context.Context, content string, force bool) error {
@@ -649,6 +649,10 @@ func (s *picoStreamer) updateReasoningLocked(ctx context.Context, content string
 }
 
 func (s *picoStreamer) sendLocked(ctx context.Context, content string, contextUsage *bus.ContextUsage) error {
+	return s.sendFinalLocked(ctx, content, contextUsage, false)
+}
+
+func (s *picoStreamer) sendFinalLocked(ctx context.Context, content string, contextUsage *bus.ContextUsage, final bool) error {
 	now := time.Now()
 	contentLen := len([]rune(content))
 
@@ -657,6 +661,7 @@ func (s *picoStreamer) sendLocked(ctx context.Context, content string, contextUs
 		payload := map[string]any{
 			PayloadKeyContent: content,
 			"message_id":      s.messageID,
+			"is_streaming":    !final,
 		}
 		if s.modelName != "" {
 			payload[PayloadKeyModelName] = s.modelName
@@ -666,10 +671,11 @@ func (s *picoStreamer) sendLocked(ctx context.Context, content string, contextUs
 		if err := s.channel.broadcastToSession(s.chatID, outMsg); err != nil {
 			return err
 		}
-	} else if content != s.lastContent || contextUsage != nil {
+	} else if content != s.lastContent || contextUsage != nil || final {
 		payload := map[string]any{
 			PayloadKeyContent: content,
 			"message_id":      s.messageID,
+			"is_streaming":    !final,
 		}
 		if s.modelName != "" {
 			payload[PayloadKeyModelName] = s.modelName

@@ -258,6 +258,7 @@ export function handlePicoMessage(
       const attachments = parseAttachments(payload)
       const contextUsage = parseContextUsage(payload)
       const isPlaceholder = payload.placeholder === true
+      const isStreaming = payload.is_streaming === true
       const agentId =
         typeof payload.agent_id === "string" ? payload.agent_id : undefined
       const modelName = parseModelName(payload)
@@ -281,6 +282,7 @@ export function handlePicoMessage(
                     role: "assistant" as const,
                     content,
                     kind,
+                    isStreaming,
                     ...(toolCalls ? { toolCalls } : {}),
                     ...(attachments ? { attachments } : {}),
                     ...(agentId ? { agentId } : {}),
@@ -310,6 +312,7 @@ export function handlePicoMessage(
               role: "assistant",
               content,
               kind,
+              isStreaming,
               ...(toolCalls ? { toolCalls } : {}),
               attachments,
               timestamp,
@@ -336,6 +339,7 @@ export function handlePicoMessage(
       const attachments = parseAttachments(payload)
       const contextUsage = parseContextUsage(payload)
       const modelName = parseModelName(payload)
+      const isStreaming = payload.is_streaming === true
       const timestamp =
         message.timestamp !== undefined &&
         Number.isFinite(Number(message.timestamp))
@@ -362,6 +366,7 @@ export function handlePicoMessage(
               ...msg,
               id: messageId,
               content,
+              isStreaming,
               ...(hasKind ? { kind } : {}),
               ...(toolCalls !== undefined ? { toolCalls } : {}),
               agentId:
@@ -389,6 +394,7 @@ export function handlePicoMessage(
                     ...msg,
                     id: messageId,
                     content,
+                    isStreaming,
                     ...(hasKind ? { kind } : {}),
                     ...(toolCalls !== undefined ? { toolCalls } : {}),
                     agentId:
@@ -428,6 +434,7 @@ export function handlePicoMessage(
               id: messageId,
               role: "assistant" as const,
               content,
+              isStreaming,
               ...(hasKind ? { kind } : {}),
               ...(toolCalls ? { toolCalls } : {}),
               agentId: incomingAgentId,

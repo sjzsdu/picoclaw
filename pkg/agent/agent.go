@@ -107,8 +107,8 @@ type processOptions struct {
 	SendResponse            bool                   // Whether to send response via bus
 	AllowInterimPicoPublish bool                   // Whether pico tool-call interim text can be published when SendResponse is false
 	SuppressToolFeedback    bool                   // Whether to suppress inline tool feedback messages
-	NoHistory              bool                   // If true, don't load session history (for heartbeat)
-	SkipSessionPersistence bool                   // If true, do not persist messages for this turn
+	NoHistory               bool                   // If true, don't load session history (for heartbeat)
+	SkipSessionPersistence  bool                   // If true, do not persist messages for this turn
 	SkipInitialSteeringPoll bool                   // If true, skip the steering poll at loop start (used by Continue)
 	InboundContext          *bus.InboundContext    // Normalized inbound facts for events/hooks
 	RouteResult             *routing.ResolvedRoute // Route decision snapshot for events/hooks
@@ -327,6 +327,13 @@ func (al *AgentLoop) Stop() {
 
 func (al *AgentLoop) SetWorkerID(id int) {
 	al.workerID = id
+}
+
+func (al *AgentLoop) GetWorkerID() int {
+	if al == nil {
+		return 0
+	}
+	return al.workerID
 }
 
 // RunInbox processes messages from a dedicated worker inbox until the context
@@ -626,7 +633,7 @@ func (al *AgentLoop) runAgentLoop(
 		}
 	}
 
-	if opts.SendResponse && result.finalContent != "" {
+	if opts.SendResponse && result.finalContent != "" && !result.responseDelivered {
 		agentID, sessionKey, scope := outboundTurnMetadata(
 			agent.ID,
 			opts.Dispatch.SessionKey,

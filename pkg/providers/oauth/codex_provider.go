@@ -60,6 +60,39 @@ func NewCodexProviderWithTokenSource(
 func (p *CodexProvider) Chat(
 	ctx context.Context, messages []Message, tools []ToolDefinition, model string, options map[string]any,
 ) (*LLMResponse, error) {
+	return p.ChatStreamEvents(ctx, messages, tools, model, options, nil)
+}
+
+func (p *CodexProvider) ChatStream(
+	ctx context.Context,
+	messages []Message,
+	tools []ToolDefinition,
+	model string,
+	options map[string]any,
+	onChunk func(accumulated string),
+) (*LLMResponse, error) {
+	return p.ChatStreamEvents(
+		ctx,
+		messages,
+		tools,
+		model,
+		options,
+		func(chunk StreamChunk) {
+			if onChunk != nil && strings.TrimSpace(chunk.Content) != "" {
+				onChunk(chunk.Content)
+			}
+		},
+	)
+}
+
+func (p *CodexProvider) ChatStreamEvents(
+	ctx context.Context,
+	messages []Message,
+	tools []ToolDefinition,
+	model string,
+	options map[string]any,
+	onChunk func(StreamChunk),
+) (*LLMResponse, error) {
 	var opts []option.RequestOption
 	accountID := p.accountID
 	resolvedModel, fallbackReason := resolveCodexModel(model)
@@ -115,26 +148,55 @@ func (p *CodexProvider) Chat(
 		switch evt.Type {
 		case "response.output_text.delta":
 			streamedText.WriteString(evt.Delta)
+			emitCodexStreamChunk(onChunk, StreamChunk{Content: streamedText.String()})
 		case "response.output_text.done":
 			if streamedText.Len() == 0 {
 				streamedText.WriteString(evt.Text)
+				emitCodexStreamChunk(onChunk, StreamChunk{Content: streamedText.String()})
 			}
 		case "response.refusal.delta":
 			streamedRefusal.WriteString(evt.Delta)
+			if streamedText.Len() == 0 {
+				emitCodexStreamChunk(onChunk, StreamChunk{Content: streamedRefusal.String()})
+			}
 		case "response.refusal.done":
 			if streamedRefusal.Len() == 0 {
 				streamedRefusal.WriteString(evt.Refusal)
+				if streamedText.Len() == 0 {
+					emitCodexStreamChunk(onChunk, StreamChunk{Content: streamedRefusal.String()})
+				}
 			}
 		case "response.reasoning_text.delta", "response.reasoning_summary_text.delta":
 			streamedReasoning.WriteString(evt.Delta)
+			emitCodexStreamChunk(onChunk, StreamChunk{ReasoningContent: streamedReasoning.String()})
 		case "response.reasoning_text.done", "response.reasoning_summary_text.done":
 			if streamedReasoning.Len() == 0 {
 				streamedReasoning.WriteString(evt.Text)
+				emitCodexStreamChunk(onChunk, StreamChunk{ReasoningContent: streamedReasoning.String()})
 			}
 		case "response.content_part.added", "response.content_part.done":
+			textLen := streamedText.Len()
+			refusalLen := streamedRefusal.Len()
+			reasoningLen := streamedReasoning.Len()
 			accumulateContentPartEvent(evt, &streamedText, &streamedRefusal, &streamedReasoning)
+			switch {
+			case streamedReasoning.Len() != reasoningLen:
+				emitCodexStreamChunk(onChunk, StreamChunk{ReasoningContent: streamedReasoning.String()})
+			case streamedText.Len() != textLen:
+				emitCodexStreamChunk(onChunk, StreamChunk{Content: streamedText.String()})
+			case streamedRefusal.Len() != refusalLen && streamedText.Len() == 0:
+				emitCodexStreamChunk(onChunk, StreamChunk{Content: streamedRefusal.String()})
+			}
 		case "response.output_item.done":
+			textLen := streamedText.Len()
+			refusalLen := streamedRefusal.Len()
 			accumulateOutputItemDone(evt, &streamedText, &streamedRefusal, &streamedToolCalls)
+			switch {
+			case streamedText.Len() != textLen:
+				emitCodexStreamChunk(onChunk, StreamChunk{Content: streamedText.String()})
+			case streamedRefusal.Len() != refusalLen && streamedText.Len() == 0:
+				emitCodexStreamChunk(onChunk, StreamChunk{Content: streamedRefusal.String()})
+			}
 		case "response.completed", "response.failed", "response.incomplete":
 			evtResp := evt.Response
 			if evtResp.ID != "" {
@@ -206,6 +268,16 @@ func (p *CodexProvider) Chat(
 		parsed.FinishReason = "stop"
 	}
 	return parsed, nil
+}
+
+func emitCodexStreamChunk(onChunk func(StreamChunk), chunk StreamChunk) {
+	if onChunk == nil {
+		return
+	}
+	if strings.TrimSpace(chunk.Content) == "" && strings.TrimSpace(chunk.ReasoningContent) == "" {
+		return
+	}
+	onChunk(chunk)
 }
 
 func (p *CodexProvider) GetDefaultModel() string {
