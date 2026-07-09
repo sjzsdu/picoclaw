@@ -44,6 +44,7 @@ func (al *AgentLoop) runTurnWithSteering(ctx context.Context, initialMsg bus.Inb
 		return
 	}
 
+	hadQueuedContinuations := al.pendingSteeringCountForScope(target.SessionKey) > 0
 	continued, continueErr := al.drainQueuedSteeringContinuations(ctx, target)
 	if continueErr != nil {
 		logger.WarnCF("agent", "Failed to continue queued steering",
@@ -52,7 +53,7 @@ func (al *AgentLoop) runTurnWithSteering(ctx context.Context, initialMsg bus.Inb
 				"chat_id": target.ChatID,
 				"error":   continueErr.Error(),
 			})
-	} else if continued != "" {
+	} else if continued != "" || hadQueuedContinuations {
 		finalResponse = continued
 	}
 
@@ -88,10 +89,9 @@ func (al *AgentLoop) drainQueuedSteeringContinuations(
 		if continueErr != nil {
 			return finalResponse, continueErr
 		}
-		if continued == "" {
-			break
+		if continued != "" {
+			finalResponse = continued
 		}
-		finalResponse = continued
 	}
 
 	return finalResponse, nil

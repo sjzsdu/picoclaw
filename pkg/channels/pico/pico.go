@@ -326,6 +326,7 @@ func (c *PicoChannel) Send(ctx context.Context, msg bus.OutboundMessage) ([]stri
 	payload := map[string]any{
 		PayloadKeyContent: content,
 		"message_id":      msgID,
+		"agent_id":        msg.AgentID,
 	}
 	if modelName := strings.TrimSpace(msg.Context.Raw[PayloadKeyModelName]); modelName != "" {
 		payload[PayloadKeyModelName] = modelName
@@ -639,7 +640,7 @@ func (s *picoStreamer) updateLocked(
 		}
 	}
 
-	return s.sendLocked(ctx, content, contextUsage)
+	return s.sendFinalLocked(ctx, content, contextUsage, force)
 }
 
 func (s *picoStreamer) updateReasoningLocked(ctx context.Context, content string, force bool) error {
@@ -663,6 +664,10 @@ func (s *picoStreamer) updateReasoningLocked(ctx context.Context, content string
 }
 
 func (s *picoStreamer) sendLocked(ctx context.Context, content string, contextUsage *bus.ContextUsage) error {
+	return s.sendFinalLocked(ctx, content, contextUsage, false)
+}
+
+func (s *picoStreamer) sendFinalLocked(ctx context.Context, content string, contextUsage *bus.ContextUsage, final bool) error {
 	now := time.Now()
 	contentLen := len([]rune(content))
 
@@ -671,6 +676,7 @@ func (s *picoStreamer) sendLocked(ctx context.Context, content string, contextUs
 		payload := map[string]any{
 			PayloadKeyContent: content,
 			"message_id":      s.messageID,
+			"is_streaming":    !final,
 		}
 		if s.modelName != "" {
 			payload[PayloadKeyModelName] = s.modelName
@@ -681,10 +687,11 @@ func (s *picoStreamer) sendLocked(ctx context.Context, content string, contextUs
 		if err := s.channel.broadcast(s.chatID, outMsg); err != nil {
 			return err
 		}
-	} else if content != s.lastContent || contextUsage != nil {
+	} else if content != s.lastContent || contextUsage != nil || final {
 		payload := map[string]any{
 			PayloadKeyContent: content,
 			"message_id":      s.messageID,
+			"is_streaming":    !final,
 		}
 		if s.modelName != "" {
 			payload[PayloadKeyModelName] = s.modelName
@@ -1225,11 +1232,19 @@ func (c *PicoChannel) handleMessageSend(pc *picoConn, msg PicoMessage) {
 		"session_id": sessionID,
 		"conn_id":    pc.id,
 	}
+	if requestedAgentID, _ := msg.Payload["agent_id"].(string); strings.TrimSpace(requestedAgentID) != "" {
+		metadata["agent_id"] = strings.TrimSpace(requestedAgentID)
+	}
+	if requestedModelName, _ := msg.Payload["model_name"].(string); strings.TrimSpace(requestedModelName) != "" {
+		metadata["model_name"] = strings.TrimSpace(requestedModelName)
+	}
 
 	logger.DebugCF("pico", "Received message", map[string]any{
 		"session_id": sessionID,
 		"preview":    truncate(content, 50),
 		"media":      len(media),
+		"agent_id":   metadata["agent_id"],
+		"model_name": metadata["model_name"],
 	})
 
 	sender := bus.SenderInfo{

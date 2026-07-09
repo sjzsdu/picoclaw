@@ -4,6 +4,7 @@ package agent
 
 import (
 	"context"
+	"strings"
 
 	"github.com/sipeed/picoclaw/pkg/bus"
 	runtimeevents "github.com/sipeed/picoclaw/pkg/events"
@@ -41,16 +42,18 @@ func (p *Pipeline) Finalize(
 
 	ts.setPhase(TurnPhaseFinalizing)
 	ts.setFinalContent(finalContent)
-	if !ts.opts.NoHistory {
+	if !ts.opts.SkipSessionPersistence {
 		finalMsg := providers.Message{
 			Role:             "assistant",
 			Content:          finalContent,
 			ModelName:        exec.llmModelName,
 			ReasoningContent: responseReasoningContent(exec.response),
 		}
-		ts.agent.Sessions.AddFullMessage(ts.sessionKey, finalMsg)
-		ts.recordPersistedMessage(finalMsg)
-		ts.ingestMessage(turnCtx, al, finalMsg)
+		if strings.TrimSpace(finalMsg.Content) != "" || strings.TrimSpace(finalMsg.ReasoningContent) != "" {
+			ts.agent.Sessions.AddFullMessage(ts.sessionKey, finalMsg)
+			ts.recordPersistedMessage(finalMsg)
+			ts.ingestMessage(turnCtx, al, finalMsg)
+		}
 		if err := ts.agent.Sessions.Save(ts.sessionKey); err != nil {
 			al.emitEvent(
 				runtimeevents.KindAgentError,
@@ -72,12 +75,13 @@ func (p *Pipeline) Finalize(
 				SessionKey: ts.sessionKey,
 				Reason:     ContextCompressReasonSummarize,
 				Budget:     ts.agent.ContextWindow,
+				Agent:      ts.agent,
 			},
 		)
 	}
 
 	contextUsage := computeContextUsage(ts.agent, ts.sessionKey)
-	streamErr := finalizeConfiguredStreamingLLM(turnCtx, ts, exec, finalContent, contextUsage)
+	streamingDelivered, streamErr := finalizeConfiguredStreamingLLM(turnCtx, ts, exec, finalContent, contextUsage)
 	// If streaming never became visible, keep the legacy Pico interim publish path
 	// so the final answer is still delivered outside normal SendResponse.
 	if ((streamErr != nil && !isConfiguredStreamingVisibleError(streamErr)) || exec.streamingFallback) &&
@@ -92,16 +96,18 @@ func (p *Pipeline) Finalize(
 	if streamErr != nil && isConfiguredStreamingVisibleError(streamErr) {
 		ts.setPhase(TurnPhaseCompleted)
 		return turnResult{
-			finalContent: finalContent,
-			status:       TurnEndStatusError,
-			followUps:    append([]bus.InboundMessage(nil), ts.followUps...),
+			finalContent:      finalContent,
+			status:            TurnEndStatusError,
+			followUps:         append([]bus.InboundMessage(nil), ts.followUps...),
+			responseDelivered: streamingDelivered,
 		}, streamErr
 	}
 	ts.setPhase(TurnPhaseCompleted)
 	return turnResult{
-		finalContent: finalContent,
-		modelName:    exec.llmModelName,
-		status:       turnStatus,
-		followUps:    append([]bus.InboundMessage(nil), ts.followUps...),
+		finalContent:      finalContent,
+		modelName:         exec.llmModelName,
+		status:            turnStatus,
+		followUps:         append([]bus.InboundMessage(nil), ts.followUps...),
+		responseDelivered: streamingDelivered && streamErr == nil,
 	}, nil
 }

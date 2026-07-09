@@ -1026,6 +1026,122 @@ func TestProcessMessage_BtwFallbackDoesNotInheritPrimaryThinkingOff(t *testing.T
 	}
 }
 
+func TestProcessMessage_IncludesRuntimeModelInDynamicContext(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				Provider:          "openai",
+				ModelName:         "gpt-friendly",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+		},
+		ModelList: []*config.ModelConfig{
+			{
+				ModelName: "gpt-friendly",
+				Model:     "openai/gpt-5.4",
+			},
+		},
+	}
+
+	msgBus := bus.NewMessageBus()
+	provider := &recordingProvider{}
+	al := NewAgentLoop(cfg, msgBus, provider)
+
+	response, err := al.processMessage(context.Background(), testInboundMessage(bus.InboundMessage{
+		Channel:  "cli",
+		SenderID: "user1",
+		ChatID:   "direct",
+		Content:  "你是什么模型",
+	}))
+	if err != nil {
+		t.Fatalf("processMessage() error = %v", err)
+	}
+	if response != "Mock response" {
+		t.Fatalf("processMessage() response = %q, want %q", response, "Mock response")
+	}
+	if len(provider.lastMessages) == 0 {
+		t.Fatal("provider did not receive any messages")
+	}
+
+	systemPrompt := provider.lastMessages[0].Content
+	for _, want := range []string{
+		"## Current Model",
+		"Model alias: gpt-friendly",
+		"Provider: openai",
+		"Model ID: gpt-5.4",
+		"do not inspect config files",
+	} {
+		if !strings.Contains(systemPrompt, want) {
+			t.Fatalf("system prompt missing model context %q:\n%s", want, systemPrompt)
+		}
+	}
+}
+
+func TestProcessMessage_PicoModelNameOverridesSelectedAgentModel(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				ModelName:         "default-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+			List: []config.AgentConfig{
+				{ID: "main", Default: true, Model: &config.AgentModelConfig{Primary: "default-model"}},
+				{ID: "stock-analyst", Model: &config.AgentModelConfig{Primary: "deepseek-r1"}},
+			},
+		},
+		ModelList: []*config.ModelConfig{
+			{ModelName: "default-model", Model: "openai/default-model"},
+			{ModelName: "deepseek-r1", Model: "ollama/deepseek-r1"},
+			{ModelName: "gpt-5.4", Model: "openai/gpt-5.4"},
+		},
+	}
+
+	provider := &recordingProvider{}
+	al := NewAgentLoop(cfg, bus.NewMessageBus(), provider)
+	al.providerFactory = func(mc *config.ModelConfig) (providers.LLMProvider, string, error) {
+		return provider, strings.TrimPrefix(mc.Model, "openai/"), nil
+	}
+
+	resp, err := al.processMessage(context.Background(), testInboundMessage(bus.InboundMessage{
+		Channel:  "pico",
+		ChatID:   "pico:session-1",
+		SenderID: "pico-user",
+		Content:  "从技术角度分析一下601688",
+		Context: bus.InboundContext{
+			Channel:  "pico",
+			ChatID:   "pico:session-1",
+			ChatType: "direct",
+			SenderID: "pico-user",
+			Raw: map[string]string{
+				"agent_id":   "stock-analyst",
+				"model_name": "gpt-5.4",
+			},
+		},
+	}))
+	if err != nil {
+		t.Fatalf("processMessage() error = %v", err)
+	}
+	if resp != "Mock response" {
+		t.Fatalf("processMessage() response = %q, want Mock response", resp)
+	}
+	if provider.lastModel != "gpt-5.4" {
+		t.Fatalf("provider model = %q, want gpt-5.4", provider.lastModel)
+	}
+	stockAgent, ok := al.GetRegistry().GetAgent("stock-analyst")
+	if !ok {
+		t.Fatal("stock-analyst agent not found")
+	}
+	if stockAgent.Model != "gpt-5.4" {
+		t.Fatalf("stock agent model = %q, want gpt-5.4", stockAgent.Model)
+	}
+}
+
 func TestProcessMessage_UseCommandLoadsRequestedSkill(t *testing.T) {
 	tmpDir := t.TempDir()
 	skillDir := filepath.Join(tmpDir, "skills", "shell")
@@ -1281,6 +1397,206 @@ func TestProcessMessage_BtwCommandUsesIsolatedProvider(t *testing.T) {
 	currentHistory := defaultAgent.Sessions.GetHistory(mainSessionKey)
 	if !reflect.DeepEqual(currentHistory, initialHistory) {
 		t.Fatalf("main session history was modified:\ngot  %#v\nwant %#v", currentHistory, initialHistory)
+	}
+}
+
+// Test 1: CLI channel bypass routes to default agent
+func TestProcessMessage_CLI_BypassesRoutingAndUsesDefaultAgent(t *testing.T) {
+	tmpDir := t.TempDir()
+	// Configure two agents: an alternate one and the default main agent
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				ModelName:         "test-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+			List: []config.AgentConfig{
+				{ID: "alt", Name: "Alternate"},
+				{ID: "main", Default: true},
+			},
+		},
+	}
+	msgBus := bus.NewMessageBus()
+	provider := &recordingProvider{}
+	al := NewAgentLoop(cfg, msgBus, provider)
+
+	// Prepare a CLI message which would normally be routed elsewhere
+	inbound := testInboundMessage(bus.InboundMessage{
+		Channel:  "cli",
+		ChatID:   "chat-1",
+		SenderID: "cli:1",
+		Content:  "hello",
+	})
+
+	// Resolve route to observe which agent would be chosen
+	route, agent, err := al.resolveMessageRoute(inbound)
+	if err != nil {
+		t.Fatalf("resolveMessageRoute() error = %v", err)
+	}
+	defAgent := al.GetRegistry().GetDefaultAgent()
+	if defAgent == nil {
+		t.Fatal("expected a default agent to exist")
+	}
+	if route.AgentID != defAgent.ID {
+		t.Fatalf("CLI route AgentID = %q, want default agent %q", route.AgentID, defAgent.ID)
+	}
+	if agent == nil || agent.ID != defAgent.ID {
+		t.Fatalf("CLI resolved agent = %v, want default agent %s", agent, defAgent.ID)
+	}
+
+	// Run the processing path
+	resp, err := al.processMessage(context.Background(), inbound)
+	if err != nil {
+		t.Fatalf("processMessage() error = %v", err)
+	}
+	if resp != "Mock response" {
+		t.Fatalf("processMessage() response = %q, want %q", resp, "Mock response")
+	}
+}
+
+// Test 2: Agent with no_history should not send previous turns to the model,
+// but should still persist the session transcript for UI/history purposes.
+func TestProcessMessage_AgentNoHistorySkipsContextLoadButPersistsTranscript(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				ModelName:         "test-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+			List: []config.AgentConfig{
+				{ID: "main", Default: true, NoHistory: true},
+				{ID: "alt"},
+			},
+		},
+		// Minimal session settings
+		Session: config.SessionConfig{Dimensions: []string{"sender"}},
+	}
+
+	msgBus := bus.NewMessageBus()
+	provider := &recordingProvider{}
+	al := NewAgentLoop(cfg, msgBus, provider)
+
+	// Compute a session key for the main route
+	route, _, err := al.resolveMessageRoute(testInboundMessage(bus.InboundMessage{
+		Channel:  "telegram",
+		ChatID:   "chat-1",
+		SenderID: "user1",
+		Content:  "hello",
+	}))
+	if err != nil {
+		t.Fatalf("resolveMessageRoute() error = %v", err)
+	}
+	allocation := al.allocateRouteSession(route, testInboundMessage(bus.InboundMessage{
+		Channel:  "telegram",
+		ChatID:   "chat-1",
+		SenderID: "user1",
+		Content:  "hello",
+	}))
+	sessionKey := resolveScopeKey(allocation.SessionKey, "")
+
+	defaultAgent := al.GetRegistry().GetDefaultAgent()
+	if defaultAgent == nil {
+		t.Fatal("expected default agent")
+	}
+	initialHistory := []providers.Message{
+		{Role: "user", Content: "We decided to avoid global state."},
+		{Role: "assistant", Content: "Right, keep it request-scoped."},
+	}
+	defaultAgent.Sessions.SetHistory(sessionKey, initialHistory)
+
+	// Process a normal message; with NoHistory = true, history should not be loaded
+	// into the LLM request, but the new user/assistant turn should still be saved.
+	_, err = al.processMessage(context.Background(), testInboundMessage(bus.InboundMessage{
+		Channel:  "telegram",
+		ChatID:   "chat-1",
+		SenderID: "user1",
+		Content:  "how are you?",
+		// Use the same session key by setting it explicitly
+		SessionKey: sessionKey,
+	}))
+	if err != nil {
+		t.Fatalf("processMessage() error = %v", err)
+	}
+
+	for _, msg := range provider.lastMessages {
+		if strings.Contains(msg.Content, "We decided to avoid global state") ||
+			strings.Contains(msg.Content, "request-scoped") {
+			t.Fatalf("no_history leaked previous history into LLM request: %#v", provider.lastMessages)
+		}
+	}
+
+	history := defaultAgent.Sessions.GetHistory(sessionKey)
+	if len(history) != len(initialHistory)+2 {
+		t.Fatalf("history length = %d, want %d: %#v", len(history), len(initialHistory)+2, history)
+	}
+	if !reflect.DeepEqual(history[:len(initialHistory)], initialHistory) {
+		t.Fatalf("initial history modified: got %#v want %#v", history[:len(initialHistory)], initialHistory)
+	}
+	if got := history[len(initialHistory)]; got.Role != "user" || got.Content != "how are you?" {
+		t.Fatalf("persisted user message = %#v", got)
+	}
+	if got := history[len(initialHistory)+1]; got.Role != "assistant" || got.Content != "Mock response" {
+		t.Fatalf("persisted assistant message = %#v", got)
+	}
+}
+
+func TestRunAgentLoop_UsesSelectedAgentSessionHistory(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				ModelName:         "test-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+			List: []config.AgentConfig{
+				{ID: "main", Default: true},
+				{ID: "alt"},
+			},
+		},
+	}
+
+	provider := &recordingProvider{}
+	al := NewAgentLoop(cfg, bus.NewMessageBus(), provider)
+	altAgent, ok := al.GetRegistry().GetAgent("alt")
+	if !ok {
+		t.Fatal("expected alt agent")
+	}
+
+	sessionKey := "agent:alt:pico:direct:pico:session-1"
+	altHistory := []providers.Message{
+		{Role: "user", Content: "Remember: selected agent history must be used."},
+		{Role: "assistant", Content: "I will use the selected agent history."},
+	}
+	altAgent.Sessions.SetHistory(sessionKey, altHistory)
+
+	_, err := al.runAgentLoop(context.Background(), altAgent, processOptions{
+		SessionKey:      sessionKey,
+		UserMessage:     "what should be remembered?",
+		DefaultResponse: defaultResponse,
+		EnableSummary:   false,
+	})
+	if err != nil {
+		t.Fatalf("runAgentLoop() error = %v", err)
+	}
+
+	for _, want := range altHistory {
+		found := false
+		for _, got := range provider.lastMessages {
+			if got.Role == want.Role && got.Content == want.Content {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("provider messages did not include selected agent history message %#v; got %#v", want, provider.lastMessages)
+		}
 	}
 }
 
@@ -1955,7 +2271,6 @@ func TestRunAgentLoop_ResponseHandledToolPublishesForUserWhenSendResponseDisable
 			UserMessage: "take a screenshot of the screen and send it to me",
 			SessionScope: &session.SessionScope{
 				Version:    session.ScopeVersionV1,
-				AgentID:    defaultAgent.ID,
 				Channel:    "telegram",
 				Dimensions: []string{"chat"},
 				Values: map[string]string{
@@ -2031,7 +2346,6 @@ func TestAppendEventContextFields_IncludesInboundRouteAndScope(t *testing.T) {
 		},
 		Scope: &session.SessionScope{
 			Version:    session.ScopeVersionV1,
-			AgentID:    "support",
 			Channel:    "slack",
 			Account:    "workspace-a",
 			Dimensions: []string{"chat", "sender"},
@@ -5368,6 +5682,54 @@ func TestAgentLoop_EmptyModelResponseUsesAccurateFallback(t *testing.T) {
 	}
 }
 
+func TestAgentLoop_PicoEmptyModelResponseUsesVisibleFallback(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				ModelName:         "test-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 3,
+			},
+		},
+	}
+
+	msgBus := bus.NewMessageBus()
+	provider := &simpleMockProvider{response: ""}
+	al := NewAgentLoop(cfg, msgBus, provider)
+
+	response, err := al.processMessage(context.Background(), testInboundMessage(bus.InboundMessage{
+		Channel:  "pico",
+		SenderID: "user-1",
+		ChatID:   "session-1",
+		Content:  "hello",
+	}))
+	if err != nil {
+		t.Fatalf("processMessage() error = %v", err)
+	}
+	if response != defaultResponse {
+		t.Fatalf("response = %q, want %q", response, defaultResponse)
+	}
+
+	agent := al.GetRegistry().GetDefaultAgent()
+	if agent == nil {
+		t.Fatal("expected default agent")
+	}
+	sessionKeys := agent.Sessions.ListSessions()
+	if len(sessionKeys) != 1 {
+		t.Fatalf("session keys = %v, want exactly 1", sessionKeys)
+	}
+	history := agent.Sessions.GetHistory(sessionKeys[0])
+	if len(history) < 2 {
+		t.Fatalf("history len = %d, want at least 2", len(history))
+	}
+	last := history[len(history)-1]
+	if last.Role != "assistant" || last.Content != defaultResponse {
+		t.Fatalf("last history message = %#v, want assistant fallback", last)
+	}
+}
+
 func TestAgentLoop_ToolLimitUsesDedicatedFallback(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "agent-test-*")
 	if err != nil {
@@ -5836,6 +6198,168 @@ func TestProcessMessage_PicoPublishesReasoningAsThoughtMessage(t *testing.T) {
 	}
 }
 
+func TestRun_PicoPublishesDirectFinalResponseOnce(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				ModelName:         "test-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+		},
+	}
+
+	msgBus := bus.NewMessageBus()
+	provider := &reasoningContentProvider{response: "final answer"}
+	al := NewAgentLoop(cfg, msgBus, provider)
+
+	runCtx, runCancel := context.WithCancel(context.Background())
+	defer runCancel()
+
+	runDone := make(chan error, 1)
+	go func() {
+		runDone <- al.Run(runCtx)
+	}()
+
+	if err := msgBus.PublishInbound(context.Background(), bus.InboundMessage{
+		Channel:  "pico",
+		SenderID: "user1",
+		ChatID:   "pico:test-session",
+		Content:  "hello",
+	}); err != nil {
+		t.Fatalf("PublishInbound() error = %v", err)
+	}
+
+	select {
+	case outbound := <-msgBus.OutboundChan():
+		if outbound.Content != "final answer" {
+			t.Fatalf("outbound content = %q, want final answer", outbound.Content)
+		}
+		if outbound.Channel != "pico" || outbound.ChatID != "pico:test-session" {
+			t.Fatalf("outbound route = %s/%s, want pico/pico:test-session", outbound.Channel, outbound.ChatID)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected pico final response")
+	}
+
+	select {
+	case outbound := <-msgBus.OutboundChan():
+		t.Fatalf("unexpected duplicate pico final response: %+v", outbound)
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	runCancel()
+	select {
+	case err := <-runDone:
+		if err != nil {
+			t.Fatalf("Run() error = %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for Run() to exit")
+	}
+}
+
+func TestProcessMessage_PicoReasoningOnlyDoesNotFallbackToEmptyResponseError(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				ModelName:         "test-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+		},
+	}
+
+	msgBus := bus.NewMessageBus()
+	provider := &reasoningContentProvider{
+		response:         "",
+		reasoningContent: "thinking trace",
+	}
+	al := NewAgentLoop(cfg, msgBus, provider)
+
+	response, err := al.processMessage(context.Background(), bus.InboundMessage{
+		Channel:  "pico",
+		SenderID: "user1",
+		ChatID:   "pico:test-session",
+		Content:  "hello",
+	})
+	if err != nil {
+		t.Fatalf("processMessage() error = %v", err)
+	}
+	if response != "" {
+		t.Fatalf("processMessage() response = %q, want empty string", response)
+	}
+
+	var thoughtMsg *bus.OutboundMessage
+	deadline := time.After(3 * time.Second)
+	for thoughtMsg == nil {
+		select {
+		case outbound := <-msgBus.OutboundChan():
+			msg := outbound
+			if msg.Content == "thinking trace" {
+				thoughtMsg = &msg
+			}
+		case <-deadline:
+			t.Fatal("expected thought outbound message for pico")
+		}
+	}
+
+	if thoughtMsg.Context.Raw[metadataKeyMessageKind] != messageKindThought {
+		t.Fatalf("thought metadata kind = %q, want %q", thoughtMsg.Context.Raw[metadataKeyMessageKind], messageKindThought)
+	}
+
+}
+
+func TestProcessMessage_PicoHandledUserToolDoesNotFallbackToEmptyResponseError(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := config.DefaultConfig()
+	cfg.Agents.Defaults.Workspace = tmpDir
+	cfg.Agents.Defaults.ModelName = "test-model"
+	cfg.Agents.Defaults.MaxTokens = 4096
+	cfg.Agents.Defaults.MaxToolIterations = 10
+
+	msgBus := bus.NewMessageBus()
+	provider := &handledUserProvider{}
+	al := NewAgentLoop(cfg, msgBus, provider)
+	al.RegisterTool(&handledUserTool{})
+
+	response, err := al.processMessage(context.Background(), bus.InboundMessage{
+		Channel:  "pico",
+		SenderID: "user1",
+		ChatID:   "pico:test-session",
+		Content:  "hello",
+	})
+	if err != nil {
+		t.Fatalf("processMessage() error = %v", err)
+	}
+	if response != "" {
+		t.Fatalf("processMessage() response = %q, want empty string", response)
+	}
+
+	var sawHandled bool
+	deadline := time.After(3 * time.Second)
+	for !sawHandled {
+		select {
+		case outbound := <-msgBus.OutboundChan():
+			if outbound.Content == "Handled user output from tool." {
+				sawHandled = true
+			}
+			if outbound.Content == "Delivering the result now." {
+				t.Fatalf("unexpected pico interim assistant content published")
+			}
+			if outbound.Content == defaultResponse {
+				t.Fatalf("unexpected empty-response fallback published to pico")
+			}
+		case <-deadline:
+			t.Fatal("expected handled tool output to be published to pico")
+		}
+	}
+}
+
 func TestProcessHeartbeat_DoesNotPublishToolFeedback(t *testing.T) {
 	tmpDir := t.TempDir()
 	heartbeatFile := filepath.Join(tmpDir, "heartbeat-task.txt")
@@ -5962,7 +6486,7 @@ func TestProcessMessage_PublishesToolFeedbackWhenEnabled(t *testing.T) {
 		if outbound.SessionKey == "" {
 			t.Fatal("expected tool feedback to carry session_key")
 		}
-		if outbound.Scope == nil || outbound.Scope.AgentID != "main" || outbound.Scope.Channel != "telegram" {
+		if outbound.Scope == nil || outbound.Scope.Channel != "telegram" {
 			t.Fatalf("expected tool feedback scope, got %+v", outbound.Scope)
 		}
 	case <-time.After(2 * time.Second):
@@ -6321,6 +6845,49 @@ func TestProcessMessage_MessageToolPublishesOutboundWithTurnMetadata(t *testing.
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("expected message tool outbound")
+	}
+}
+
+func TestProcessMessage_PicoMessageToolDoesNotFallbackToEmptyResponse(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Agents.Defaults.Workspace = t.TempDir()
+	cfg.Agents.Defaults.ModelName = "test-model"
+	cfg.Agents.Defaults.MaxTokens = 4096
+	cfg.Agents.Defaults.MaxToolIterations = 10
+	cfg.Session.Dimensions = []string{"chat"}
+
+	msgBus := bus.NewMessageBus()
+	provider := &messageToolProvider{}
+	al := NewAgentLoop(cfg, msgBus, provider)
+
+	response, err := al.processMessage(context.Background(), testInboundMessage(bus.InboundMessage{
+		Channel:  "pico",
+		SenderID: "user-1",
+		ChatID:   "session-1",
+		Content:  "send a direct message",
+	}))
+	if err != nil {
+		t.Fatalf("processMessage() error = %v", err)
+	}
+	if response != "" {
+		t.Fatalf("processMessage() response = %q, want empty final response after visible pico tool output", response)
+	}
+
+	select {
+	case outbound := <-msgBus.OutboundChan():
+		if outbound.Content != "direct tool message" {
+			t.Fatalf("outbound content = %q, want direct tool message", outbound.Content)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected pico message tool outbound")
+	}
+
+	select {
+	case outbound := <-msgBus.OutboundChan():
+		if outbound.Content == defaultResponse {
+			t.Fatalf("unexpected empty-response fallback after pico message tool output: %+v", outbound)
+		}
+	case <-time.After(200 * time.Millisecond):
 	}
 }
 

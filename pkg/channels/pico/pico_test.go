@@ -369,6 +369,9 @@ func TestBeginStream_CreatesAndUpdatesSameMessage(t *testing.T) {
 	if got := first.Payload[PayloadKeyContent]; got != "hello" {
 		t.Fatalf("first content = %#v, want hello", got)
 	}
+	if got := first.Payload["is_streaming"]; got != true {
+		t.Fatalf("first is_streaming = %#v, want true", got)
+	}
 	if got := first.Payload[PayloadKeyModelName]; got != "gpt-5.4" {
 		t.Fatalf("first model_name = %#v, want %q", got, "gpt-5.4")
 	}
@@ -391,8 +394,28 @@ func TestBeginStream_CreatesAndUpdatesSameMessage(t *testing.T) {
 	if got := second.Payload[PayloadKeyContent]; got != secondContent {
 		t.Fatalf("second content = %#v, want %q", got, secondContent)
 	}
+	if got := second.Payload["is_streaming"]; got != true {
+		t.Fatalf("second is_streaming = %#v, want true", got)
+	}
 	if got := second.Payload[PayloadKeyModelName]; got != "gpt-5.4" {
 		t.Fatalf("second model_name = %#v, want %q", got, "gpt-5.4")
+	}
+
+	if err := streamer.Finalize(context.Background(), secondContent); err != nil {
+		t.Fatalf("Finalize(error) = %v", err)
+	}
+	final := mustReceivePicoMessage(t, received)
+	if final.Type != TypeMessageUpdate {
+		t.Fatalf("final type = %q, want %q", final.Type, TypeMessageUpdate)
+	}
+	if got := final.Payload["message_id"]; got != msgID {
+		t.Fatalf("final message_id = %#v, want %q", got, msgID)
+	}
+	if got := final.Payload[PayloadKeyContent]; got != secondContent {
+		t.Fatalf("final content = %#v, want %q", got, secondContent)
+	}
+	if got := final.Payload["is_streaming"]; got != false {
+		t.Fatalf("final is_streaming = %#v, want false", got)
 	}
 }
 

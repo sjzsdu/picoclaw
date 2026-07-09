@@ -25,10 +25,12 @@ func (h *Handler) registerModelRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/models/catalog", h.handleListCatalogs)
 	mux.HandleFunc("DELETE /api/models/catalog/{id}", h.handleDeleteCatalog)
 	mux.HandleFunc("POST /api/models", h.handleAddModel)
+	mux.HandleFunc("POST /api/models/test", h.handleTestModel)
+	mux.HandleFunc("POST /api/models/test-all", h.handleTestAllModels)
 	mux.HandleFunc("POST /api/models/default", h.handleSetDefaultModel)
 	mux.HandleFunc("PUT /api/models/{index}", h.handleUpdateModel)
 	mux.HandleFunc("DELETE /api/models/{index}", h.handleDeleteModel)
-	mux.HandleFunc("POST /api/models/{index}/test", h.handleTestModel)
+	mux.HandleFunc("POST /api/models/{index}/test", h.handleTestSavedModel)
 	mux.HandleFunc("POST /api/models/test-inline", h.handleTestInlineModel)
 }
 
@@ -52,12 +54,18 @@ type modelResponse struct {
 	ThinkingLevel       string                      `json:"thinking_level,omitempty"`
 	ToolSchemaTransform string                      `json:"tool_schema_transform,omitempty"`
 	Streaming           config.ModelStreamingConfig `json:"streaming,omitempty"`
+	DisableTools        bool                        `json:"disable_tools,omitempty"`
 	ExtraBody           map[string]any              `json:"extra_body,omitempty"`
 	CustomHeaders       map[string]string           `json:"custom_headers,omitempty"`
 	// Meta
 	Enabled             bool   `json:"enabled"`
 	Available           bool   `json:"available"`
 	Status              string `json:"status"`
+	Reason              string `json:"status_reason,omitempty"`
+	LastTestStatus      string `json:"last_test_status,omitempty"`
+	LastTestReason      string `json:"last_test_reason,omitempty"`
+	LastTestMessage     string `json:"last_test_message,omitempty"`
+	LastTestedAtUnix    int64  `json:"last_tested_at_unix,omitempty"`
 	IsDefault           bool   `json:"is_default"`
 	IsVirtual           bool   `json:"is_virtual"`
 	DefaultModelAllowed bool   `json:"default_model_allowed"`
@@ -235,6 +243,13 @@ func normalizeStoredModelProviders(cfg *config.Config) bool {
 	return changed
 }
 
+type modelConfigRequest struct {
+	config.ModelConfig
+	APIKey       string `json:"api_key"`
+	Index        *int   `json:"index,omitempty"`
+	IncludeTools *bool  `json:"include_tools,omitempty"`
+}
+
 // handleListModels returns all model_list entries with masked API keys.
 //
 //	GET /api/models
@@ -282,11 +297,17 @@ func (h *Handler) handleListModels(w http.ResponseWriter, r *http.Request) {
 			ThinkingLevel:       m.ThinkingLevel,
 			ToolSchemaTransform: m.ToolSchemaTransform,
 			Streaming:           m.Streaming,
+			DisableTools:        m.DisableTools,
 			ExtraBody:           m.ExtraBody,
 			CustomHeaders:       m.CustomHeaders,
 			Enabled:             m.Enabled,
 			Available:           modelStatuses[i].Available,
 			Status:              modelStatuses[i].Status,
+			Reason:              modelStatuses[i].Reason,
+			LastTestStatus:      m.LastTestStatus,
+			LastTestReason:      m.LastTestReason,
+			LastTestMessage:     m.LastTestMessage,
+			LastTestedAtUnix:    m.LastTestedAtUnix,
 			IsDefault:           m.ModelName == defaultModel,
 			IsVirtual:           m.IsVirtual(),
 			DefaultModelAllowed: defaultModelAllowedForModelConfig(m),
@@ -604,11 +625,266 @@ func (h *Handler) handleSetDefaultModel(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
-// maskAPIKey returns a masked version of an API key for safe display.
+func decodeModelConfigRequest(w http.ResponseWriter, r *http.Request) (modelConfigRequest, bool) {
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		http.Error(w, "Failed to read request body", http.StatusBadRequest)
+		return modelConfigRequest{}, false
+	}
+	defer r.Body.Close()
+
+	var mc modelConfigRequest
+	if err = json.Unmarshal(body, &mc); err != nil {
+		http.Error(w, fmt.Sprintf("Invalid JSON: %v", err), http.StatusBadRequest)
+		return modelConfigRequest{}, false
+	}
+	return mc, true
+}
+
+// handleTestModel tests a single model configuration.
+//
+//	POST /api/models/test
+func (h *Handler) handleTestModel(w http.ResponseWriter, r *http.Request) {
+	mc, ok := decodeModelConfigRequest(w, r)
+	if !ok {
+		return
+	}
+	if mc.ModelConfig.IsVirtual() {
+		http.Error(w, "virtual models cannot be tested directly", http.StatusBadRequest)
+		return
+	}
+	if err := mc.Validate(); err != nil {
+		http.Error(w, fmt.Sprintf("Validation error: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	cfg, err := config.LoadConfig(h.configPath)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to load config: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	if mc.Index != nil && *mc.Index >= 0 && *mc.Index < len(cfg.ModelList) {
+		applyPersistedModelSecret(&mc.ModelConfig, cfg.ModelList[*mc.Index], mc.APIKey)
+	} else if mc.APIKey != "" {
+		mc.ModelConfig.SetAPIKey(mc.APIKey)
+	}
+
+	result := runModelChatTest(r.Context(), &mc.ModelConfig, mc.IncludeTools)
+	persistModelTestResult(cfg, mc.Index, mc.ModelConfig.ModelName, result)
+	if err := config.SaveConfig(h.configPath, cfg); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to save config: %v", err), http.StatusInternalServerError)
+		return
+	}
+	if result.Status != "ok" {
+		http.Error(w, fmt.Sprintf("Model test failed: %s", result.Reason), http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
+}
+
+// handleTestAllModels tests all model configurations.
+//
+//	POST /api/models/test-all
+func (h *Handler) handleTestAllModels(w http.ResponseWriter, r *http.Request) {
+	var req modelBatchTestRequest
+	if r.Body != nil {
+		defer r.Body.Close()
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err != io.EOF {
+			http.Error(w, "Invalid JSON payload", http.StatusBadRequest)
+			return
+		}
+	}
+
+	cfg, err := config.LoadConfig(h.configPath)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to load config: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	providerFilter := strings.ToLower(strings.TrimSpace(req.ProviderKey))
+	results := make([]modelBatchTestResult, 0, len(cfg.ModelList))
+	for i, modelCfg := range cfg.ModelList {
+		if modelCfg == nil || modelCfg.IsVirtual() {
+			continue
+		}
+		if providerFilter != "" && modelProtocol(modelCfg) != providerFilter {
+			continue
+		}
+		if !hasModelConfiguration(modelCfg) {
+			continue
+		}
+
+		candidate := *modelCfg
+		result := runModelChatTest(r.Context(), &candidate, boolPtr(false))
+		updatePersistedModelTestResult(modelCfg, result)
+		results = append(results, modelBatchTestResult{
+			Index:            i,
+			ModelName:        modelCfg.ModelName,
+			Available:        result.Available,
+			Status:           normalizeModelTestStatus(result),
+			Reason:           result.Reason,
+			LastTestStatus:   modelCfg.LastTestStatus,
+			LastTestReason:   modelCfg.LastTestReason,
+			LastTestMessage:  modelCfg.LastTestMessage,
+			LastTestedAtUnix: modelCfg.LastTestedAtUnix,
+		})
+	}
+
+	if err := config.SaveConfig(h.configPath, cfg); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to save config: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"status":  "ok",
+		"results": results,
+	})
+}
+
+const modelTestTimeout = 20 * time.Second
+
+type modelTestResponse struct {
+	Status    string `json:"status"`
+	Message   string `json:"message,omitempty"`
+	Available bool   `json:"available,omitempty"`
+	Reason    string `json:"reason,omitempty"`
+}
+
+type modelBatchTestResult struct {
+	Index            int    `json:"index"`
+	ModelName        string `json:"model_name"`
+	Available        bool   `json:"available"`
+	Status           string `json:"status"`
+	Reason           string `json:"reason,omitempty"`
+	LastTestStatus   string `json:"last_test_status,omitempty"`
+	LastTestReason   string `json:"last_test_reason,omitempty"`
+	LastTestMessage  string `json:"last_test_message,omitempty"`
+	LastTestedAtUnix int64  `json:"last_tested_at_unix,omitempty"`
+}
+
+type modelBatchTestRequest struct {
+	ProviderKey string `json:"provider_key,omitempty"`
+}
+
+func applyPersistedModelSecret(target, persisted *config.ModelConfig, apiKey string) {
+	if target == nil || persisted == nil {
+		return
+	}
+	if strings.TrimSpace(apiKey) == "" {
+		target.SetAPIKey(persisted.APIKey())
+		return
+	}
+	target.SetAPIKey(apiKey)
+}
+
+func modelTestShouldIncludeTools(mc *config.ModelConfig, includeTools *bool) bool {
+	if includeTools != nil {
+		return *includeTools
+	}
+	return false
+}
+
+func runModelChatTest(ctx context.Context, mc *config.ModelConfig, includeTools *bool) modelTestResponse {
+	provider, modelID, err := providers.CreateProviderFromConfig(mc)
+	if err != nil {
+		return modelTestResponse{
+			Status:    "error",
+			Available: false,
+			Reason:    fmt.Sprintf("Failed to initialize model: %v", err),
+		}
+	}
+
+	testCtx, cancel := context.WithTimeout(ctx, modelTestTimeout)
+	defer cancel()
+
+	shouldIncludeTools := modelTestShouldIncludeTools(mc, includeTools)
+
+	var toolDefs []providers.ToolDefinition
+	if shouldIncludeTools {
+		toolDefs = []providers.ToolDefinition{
+			{
+				Type: "function",
+				Function: providers.ToolFunctionDefinition{
+					Name:        "ping",
+					Description: "Return a simple test response.",
+					Parameters: map[string]any{
+						"type":       "object",
+						"properties": map[string]any{},
+					},
+				},
+			},
+		}
+	}
+
+	response, err := provider.Chat(
+		testCtx,
+		[]providers.Message{{
+			Role:    "user",
+			Content: "Reply with exactly OK.",
+		}},
+		toolDefs,
+		modelID,
+		map[string]any{
+			"max_tokens":  8,
+			"temperature": 0,
+		},
+	)
+	if err != nil {
+		return modelTestResponse{
+			Status:    "error",
+			Available: false,
+			Reason:    err.Error(),
+		}
+	}
+
+	return modelTestResponse{
+		Status:    "ok",
+		Message:   strings.TrimSpace(response.Content),
+		Available: true,
+	}
+}
+
+func normalizeModelTestStatus(result modelTestResponse) string {
+	if result.Available {
+		return modelStatusAvailable
+	}
+	if strings.TrimSpace(result.Reason) == "" {
+		return modelStatusUnreachable
+	}
+	return modelStatusUnreachable
+}
+
+func boolPtr(b bool) *bool {
+	return &b
+}
+
+func persistModelTestResult(cfg *config.Config, index *int, modelName string, result modelTestResponse) {
+	if index != nil && *index >= 0 && *index < len(cfg.ModelList) {
+		updatePersistedModelTestResult(cfg.ModelList[*index], result)
+		return
+	}
+	for _, modelCfg := range cfg.ModelList {
+		if modelCfg != nil && modelCfg.ModelName == modelName {
+			updatePersistedModelTestResult(modelCfg, result)
+			return
+		}
+	}
+}
+
+func updatePersistedModelTestResult(modelCfg *config.ModelConfig, result modelTestResponse) {
+	modelCfg.LastTestStatus = strings.TrimSpace(result.Status)
+	modelCfg.LastTestReason = strings.TrimSpace(result.Reason)
+	modelCfg.LastTestMessage = strings.TrimSpace(result.Message)
+	modelCfg.LastTestedAtUnix = time.Now().Unix()
+}
+
 // Keys longer than 12 chars show prefix + last 4 chars: "sk-****abcd".
 // Keys 9-12 chars show prefix + last 2 chars: "sk-****cd".
 // Shorter keys are fully masked as "****".
-// Empty keys return empty string.
 // Ensure at least 40% of the key will not be displayed.
 func maskAPIKey(key string) string {
 	if key == "" {
@@ -929,10 +1205,10 @@ func normalizeAPIBaseForCompare(raw string) string {
 	return strings.ToLower(u.Scheme) + "://" + strings.ToLower(u.Host) + strings.TrimRight(u.Path, "/")
 }
 
-// handleTestModel tests connectivity to a model endpoint.
+// handleTestSavedModel tests connectivity to a saved model endpoint.
 //
 //	POST /api/models/{index}/test
-func (h *Handler) handleTestModel(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) handleTestSavedModel(w http.ResponseWriter, r *http.Request) {
 	idx, err := strconv.Atoi(r.PathValue("index"))
 	if err != nil {
 		http.Error(w, "Invalid index", http.StatusBadRequest)

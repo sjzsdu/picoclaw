@@ -50,6 +50,34 @@ func TestBuildCodexParams_SystemAsInstructions(t *testing.T) {
 	}
 }
 
+func TestBuildCodexParams_FallbackInputWhenTranslatedInputEmpty(t *testing.T) {
+	params := buildCodexParams([]Message{{Role: "system", Content: "You are helpful"}}, nil, "gpt-4o", map[string]any{}, false)
+	if params.Input.OfInputItemList == nil || len(params.Input.OfInputItemList) != 1 {
+		t.Fatalf("len(Input items) = %d, want 1", len(params.Input.OfInputItemList))
+	}
+	msg := params.Input.OfInputItemList[0].OfMessage
+	if msg == nil {
+		t.Fatal("fallback input should be a user message")
+	}
+	if got := msg.Content.OfString.Or(""); got != "You are helpful" {
+		t.Fatalf("fallback content = %q, want instructions", got)
+	}
+}
+
+func TestBuildCodexParams_FallbackInputUsesUnknownRoleContent(t *testing.T) {
+	params := buildCodexParams([]Message{{Role: "developer", Content: "Do the task"}}, nil, "gpt-4o", map[string]any{}, false)
+	if params.Input.OfInputItemList == nil || len(params.Input.OfInputItemList) != 1 {
+		t.Fatalf("len(Input items) = %d, want 1", len(params.Input.OfInputItemList))
+	}
+	msg := params.Input.OfInputItemList[0].OfMessage
+	if msg == nil {
+		t.Fatal("fallback input should be a user message")
+	}
+	if got := msg.Content.OfString.Or(""); got != "Do the task" {
+		t.Fatalf("fallback content = %q, want original content", got)
+	}
+}
+
 func TestBuildCodexParams_ToolCallConversation(t *testing.T) {
 	messages := []Message{
 		{Role: "user", Content: "What's the weather?"},
@@ -374,126 +402,157 @@ func TestCodexProvider_ChatRoundTrip(t *testing.T) {
 	}
 }
 
-func TestCodexProvider_ChatRoundTrip_OutputTextDeltaFallback(t *testing.T) {
+func TestCodexProvider_ChatRoundTrip_UsesStreamedTextWhenCompletedEventHasNoOutput(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/responses" {
 			http.Error(w, "not found: "+r.URL.Path, http.StatusNotFound)
 			return
 		}
-
-		var reqBody map[string]any
-		if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
-			http.Error(w, "invalid json", http.StatusBadRequest)
-			return
-		}
-		if reqBody["stream"] != true {
-			http.Error(w, "stream must be true", http.StatusBadRequest)
-			return
-		}
-
-		resp := map[string]any{
-			"id":     "resp_test",
-			"object": "response",
-			"status": "completed",
-			"output": nil,
-		}
-		writeOutputTextDeltaSSE(w, "OK", resp)
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "event: response.output_text.delta\n")
+		fmt.Fprint(w, "data: {\"type\":\"response.output_text.delta\",\"sequence_number\":1,\"item_id\":\"msg_1\",\"output_index\":0,\"content_index\":0,\"delta\":\"Hi \",\"logprobs\":[]}\n\n")
+		fmt.Fprint(w, "event: response.output_text.delta\n")
+		fmt.Fprint(w, "data: {\"type\":\"response.output_text.delta\",\"sequence_number\":2,\"item_id\":\"msg_1\",\"output_index\":0,\"content_index\":0,\"delta\":\"there!\",\"logprobs\":[]}\n\n")
+		fmt.Fprint(w, "event: response.completed\n")
+		fmt.Fprint(w, "data: {\"type\":\"response.completed\",\"sequence_number\":3,\"response\":{\"id\":\"resp_test\",\"object\":\"response\",\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":12,\"output_tokens\":6,\"total_tokens\":18,\"input_tokens_details\":{\"cached_tokens\":0},\"output_tokens_details\":{\"reasoning_tokens\":0}}}}\n\n")
+		fmt.Fprint(w, "data: [DONE]\n\n")
 	}))
 	defer server.Close()
 
 	provider := NewCodexProvider("test-token", "acc-123")
 	provider.client = createOpenAITestClient(server.URL, "test-token", "acc-123")
 
-	resp, err := provider.Chat(
-		t.Context(),
-		[]Message{{Role: "user", Content: "Hello"}},
-		nil,
-		"gpt-4o",
-		map[string]any{},
-	)
+	resp, err := provider.Chat(t.Context(), []Message{{Role: "user", Content: "Hello"}}, nil, "gpt-5.4", nil)
 	if err != nil {
 		t.Fatalf("Chat() error: %v", err)
 	}
-	if resp.Content != "OK" {
-		t.Errorf("Content = %q, want %q", resp.Content, "OK")
+	if resp.Content != "Hi there!" {
+		t.Fatalf("Content = %q, want %q", resp.Content, "Hi there!")
+	}
+	if resp.FinishReason != "stop" {
+		t.Fatalf("FinishReason = %q, want stop", resp.FinishReason)
+	}
+	if resp.Usage == nil || resp.Usage.TotalTokens != 18 {
+		t.Fatalf("Usage = %#v, want total_tokens=18", resp.Usage)
 	}
 }
 
-func TestCodexProvider_ChatRoundTrip_OutputItemDoneFallback(t *testing.T) {
+func TestCodexProvider_ChatStreamEvents_EmitsAccumulatedChunks(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/responses" {
 			http.Error(w, "not found: "+r.URL.Path, http.StatusNotFound)
 			return
 		}
-
-		var reqBody map[string]any
-		if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
-			http.Error(w, "invalid json", http.StatusBadRequest)
-			return
-		}
-		if reqBody["stream"] != true {
-			http.Error(w, "stream must be true", http.StatusBadRequest)
-			return
-		}
-
-		item := map[string]any{
-			"id":        "fc_1",
-			"type":      "function_call",
-			"call_id":   "call_abc",
-			"name":      "write_file",
-			"arguments": `{"path":"x.txt","content":"ok"}`,
-			"status":    "completed",
-		}
-		resp := map[string]any{
-			"id":     "resp_test",
-			"object": "response",
-			"status": "completed",
-			"output": []map[string]any{},
-		}
-		writeOutputItemDoneSSE(w, item, resp)
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "event: response.reasoning_text.delta\n")
+		fmt.Fprint(w, "data: {\"type\":\"response.reasoning_text.delta\",\"sequence_number\":1,\"item_id\":\"rs_1\",\"output_index\":0,\"content_index\":0,\"delta\":\"Thinking\"}\n\n")
+		fmt.Fprint(w, "event: response.output_text.delta\n")
+		fmt.Fprint(w, "data: {\"type\":\"response.output_text.delta\",\"sequence_number\":2,\"item_id\":\"msg_1\",\"output_index\":0,\"content_index\":0,\"delta\":\"Hi \",\"logprobs\":[]}\n\n")
+		fmt.Fprint(w, "event: response.output_text.delta\n")
+		fmt.Fprint(w, "data: {\"type\":\"response.output_text.delta\",\"sequence_number\":3,\"item_id\":\"msg_1\",\"output_index\":0,\"content_index\":0,\"delta\":\"there!\",\"logprobs\":[]}\n\n")
+		fmt.Fprint(w, "event: response.completed\n")
+		fmt.Fprint(w, "data: {\"type\":\"response.completed\",\"sequence_number\":4,\"response\":{\"id\":\"resp_test\",\"object\":\"response\",\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":12,\"output_tokens\":6,\"total_tokens\":18,\"input_tokens_details\":{\"cached_tokens\":0},\"output_tokens_details\":{\"reasoning_tokens\":0}}}}\n\n")
+		fmt.Fprint(w, "data: [DONE]\n\n")
 	}))
 	defer server.Close()
 
 	provider := NewCodexProvider("test-token", "acc-123")
 	provider.client = createOpenAITestClient(server.URL, "test-token", "acc-123")
 
-	resp, err := provider.Chat(
+	var chunks []StreamChunk
+	resp, err := provider.ChatStreamEvents(
 		t.Context(),
-		[]Message{{Role: "user", Content: "Create x.txt"}},
-		[]ToolDefinition{
-			{
-				Type: "function",
-				Function: ToolFunctionDefinition{
-					Name:        "write_file",
-					Description: "write file",
-					Parameters:  map[string]any{"type": "object"},
-				},
-			},
+		[]Message{{Role: "user", Content: "Hello"}},
+		nil,
+		"gpt-5.4",
+		nil,
+		func(chunk StreamChunk) {
+			chunks = append(chunks, chunk)
 		},
-		"gpt-5.5",
-		map[string]any{},
 	)
+	if err != nil {
+		t.Fatalf("ChatStreamEvents() error: %v", err)
+	}
+	if resp.Content != "Hi there!" {
+		t.Fatalf("Content = %q, want %q", resp.Content, "Hi there!")
+	}
+	if len(chunks) != 3 {
+		t.Fatalf("chunks = %#v, want 3 chunks", chunks)
+	}
+	if chunks[0].ReasoningContent != "Thinking" {
+		t.Fatalf("first chunk = %#v, want reasoning", chunks[0])
+	}
+	if chunks[1].Content != "Hi " || chunks[2].Content != "Hi there!" {
+		t.Fatalf("content chunks = %#v, want accumulated content", chunks)
+	}
+}
+
+func TestCodexProvider_ChatRoundTrip_RecoversContentFromOutputItemDoneEvent(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/responses" {
+			http.Error(w, "not found: "+r.URL.Path, http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "event: response.output_item.done\n")
+		fmt.Fprint(w, "data: {\"type\":\"response.output_item.done\",\"sequence_number\":1,\"output_index\":0,\"item\":{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"status\":\"completed\",\"content\":[{\"type\":\"output_text\",\"text\":\"Recovered from output item\"}]}}\n\n")
+		fmt.Fprint(w, "event: response.completed\n")
+		fmt.Fprint(w, "data: {\"type\":\"response.completed\",\"sequence_number\":2,\"response\":{\"id\":\"resp_test\",\"object\":\"response\",\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":12,\"output_tokens\":6,\"total_tokens\":18,\"input_tokens_details\":{\"cached_tokens\":0},\"output_tokens_details\":{\"reasoning_tokens\":0}}}}\n\n")
+		fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	provider := NewCodexProvider("test-token", "acc-123")
+	provider.client = createOpenAITestClient(server.URL, "test-token", "acc-123")
+
+	resp, err := provider.Chat(t.Context(), []Message{{Role: "user", Content: "Hello"}}, nil, "gpt-5.4", nil)
+	if err != nil {
+		t.Fatalf("Chat() error: %v", err)
+	}
+	if resp.Content != "Recovered from output item" {
+		t.Fatalf("Content = %q, want %q", resp.Content, "Recovered from output item")
+	}
+	if resp.FinishReason != "stop" {
+		t.Fatalf("FinishReason = %q, want stop", resp.FinishReason)
+	}
+}
+
+func TestCodexProvider_ChatRoundTrip_RecoversToolCallFromOutputItemDoneEvent(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/responses" {
+			http.Error(w, "not found: "+r.URL.Path, http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "event: response.output_item.done\n")
+		fmt.Fprint(w, "data: {\"type\":\"response.output_item.done\",\"sequence_number\":1,\"output_index\":0,\"item\":{\"id\":\"fc_1\",\"type\":\"function_call\",\"call_id\":\"call_abc\",\"name\":\"read_file\",\"arguments\":\"{\\\"path\\\":\\\"README.md\\\"}\",\"status\":\"completed\"}}\n\n")
+		fmt.Fprint(w, "event: response.completed\n")
+		fmt.Fprint(w, "data: {\"type\":\"response.completed\",\"sequence_number\":2,\"response\":{\"id\":\"resp_test\",\"object\":\"response\",\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":12,\"output_tokens\":6,\"total_tokens\":18,\"input_tokens_details\":{\"cached_tokens\":0},\"output_tokens_details\":{\"reasoning_tokens\":0}}}}\n\n")
+		fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	provider := NewCodexProvider("test-token", "acc-123")
+	provider.client = createOpenAITestClient(server.URL, "test-token", "acc-123")
+
+	resp, err := provider.Chat(t.Context(), []Message{{Role: "user", Content: "Hello"}}, nil, "gpt-5.4", nil)
 	if err != nil {
 		t.Fatalf("Chat() error: %v", err)
 	}
 	if len(resp.ToolCalls) != 1 {
 		t.Fatalf("len(ToolCalls) = %d, want 1", len(resp.ToolCalls))
 	}
-	tc := resp.ToolCalls[0]
-	if tc.ID != "call_abc" {
-		t.Errorf("ToolCall.ID = %q, want %q", tc.ID, "call_abc")
+	if resp.ToolCalls[0].Name != "read_file" {
+		t.Fatalf("ToolCalls[0].Name = %q, want read_file", resp.ToolCalls[0].Name)
 	}
-	if tc.Name != "write_file" {
-		t.Errorf("ToolCall.Name = %q, want %q", tc.Name, "write_file")
+	if resp.ToolCalls[0].ID != "call_abc" {
+		t.Fatalf("ToolCalls[0].ID = %q, want call_abc", resp.ToolCalls[0].ID)
 	}
-	if tc.Arguments["path"] != "x.txt" {
-		t.Errorf("ToolCall.Arguments[path] = %v, want x.txt", tc.Arguments["path"])
-	}
-	if tc.Arguments["content"] != "ok" {
-		t.Errorf("ToolCall.Arguments[content] = %v, want ok", tc.Arguments["content"])
+	if resp.ToolCalls[0].Arguments["path"] != "README.md" {
+		t.Fatalf("ToolCalls[0].Arguments[path] = %v, want README.md", resp.ToolCalls[0].Arguments["path"])
 	}
 	if resp.FinishReason != "tool_calls" {
-		t.Errorf("FinishReason = %q, want %q", resp.FinishReason, "tool_calls")
+		t.Fatalf("FinishReason = %q, want tool_calls", resp.FinishReason)
 	}
 }
 
