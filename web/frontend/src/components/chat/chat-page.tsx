@@ -156,6 +156,12 @@ export function ChatPage() {
       ),
     [agents],
   )
+  const selectedAgentModelName = useMemo(
+    () =>
+      agents.find((agent) => agent.id === selectedAgentId)?.model_name?.trim() ||
+      "",
+    [agents, selectedAgentId],
+  )
 
   const {
     selectedModelName,
@@ -168,6 +174,7 @@ export function ChatPage() {
   } = useChatModels({
     isConnected: isGatewayRunning,
     activeSessionId,
+    agentModelName: selectedAgentModelName,
   })
   const inputDisabledReason = resolveChatInputDisabledReason({
     hasDefaultModel: Boolean(selectedModelName),

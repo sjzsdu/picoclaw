@@ -4,6 +4,7 @@ export interface AgentInfo {
   id: string
   name: string
   description?: string
+  model_name: string
 }
 
 interface GetAgentsResponse {

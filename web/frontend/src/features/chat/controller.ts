@@ -3,6 +3,7 @@ import { toast } from "sonner"
 
 import { type SessionHistoryError } from "@/api/sessions"
 import {
+  hasDuplicateChatMessage,
   type SessionMessagesResult,
   loadSessionMessages,
   mergeHistoryMessages,
@@ -166,7 +167,7 @@ function handleCrossTabUserMessage(event: Event) {
   }
 
   updateChatStore((prev) => {
-    if (prev.messages.some((message) => message.id === detail.message.id)) {
+    if (hasDuplicateChatMessage(prev.messages, detail.message)) {
       return prev
     }
     return {

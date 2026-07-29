@@ -71,7 +71,7 @@ export async function loadSessionMessages(
   const summaryMessages: ChatMessage[] = summary
     ? [
         {
-          id: `hist-summary-${Date.now()}`,
+          id: `hist-summary-${sessionId}`,
           role: "assistant",
           content: `Earlier conversation summary:\n\n${summary}`,
           reasoningContent: summary,
@@ -88,7 +88,7 @@ export async function loadSessionMessages(
       ...detail.messages
         .filter((message) => !shouldHideHistoryMessage(message))
         .map((message, index) => ({
-          id: `hist-${index}-${Date.now()}`,
+          id: `hist-${sessionId}-${index}`,
           role: message.role,
           content: message.content,
           reasoningContent: message.reasoning_content,
@@ -152,23 +152,64 @@ function comparableTimestamp(timestamp: number | string): number {
   return Number.isFinite(numeric) ? numeric : 0
 }
 
+function messageComparableParts(message: ChatMessage): string {
+  const attachmentSignature = (message.attachments ?? [])
+    .map(
+      (attachment) =>
+        `${attachment.type}\u0001${attachment.url}\u0001${attachment.filename ?? ""}`,
+    )
+    .join("\u0002")
+
+  return `${message.role}\u0000${message.content}\u0000${message.kind ?? ""}\u0000${message.modelName ?? ""}\u0000${attachmentSignature}\u0000${toolCallsSignature(
+    message.toolCalls,
+  )}`
+}
+
+export function chatMessagesMatchForDedupe(
+  left: ChatMessage,
+  right: ChatMessage,
+): boolean {
+  if (left.id === right.id) {
+    return true
+  }
+
+  if (messageSignature(left) === messageSignature(right)) {
+    return true
+  }
+
+  if (messageComparableParts(left) !== messageComparableParts(right)) {
+    return false
+  }
+
+  const leftTime = comparableTimestamp(left.timestamp)
+  const rightTime = comparableTimestamp(right.timestamp)
+  if (leftTime === 0 || rightTime === 0) {
+    return false
+  }
+
+  return Math.abs(leftTime - rightTime) <= 5
+}
+
+export function hasDuplicateChatMessage(
+  messages: ChatMessage[],
+  incoming: ChatMessage,
+): boolean {
+  return messages.some((message) =>
+    chatMessagesMatchForDedupe(message, incoming),
+  )
+}
+
 export function mergeHistoryMessages(
   historyMessages: ChatMessage[],
   currentMessages: ChatMessage[],
 ): ChatMessage[] {
-  const currentIds = new Set(currentMessages.map((message) => message.id))
-  const currentSignatures = new Set(
-    currentMessages.map((message) => messageSignature(message)),
-  )
-
-  const merged = [
-    ...historyMessages.filter(
-      (message) =>
-        !currentIds.has(message.id) &&
-        !currentSignatures.has(messageSignature(message)),
-    ),
-    ...currentMessages,
-  ]
+  const merged = [...currentMessages]
+  for (const historyMessage of historyMessages) {
+    if (hasDuplicateChatMessage(merged, historyMessage)) {
+      continue
+    }
+    merged.push(historyMessage)
+  }
 
   return merged.sort(
     (left, right) =>

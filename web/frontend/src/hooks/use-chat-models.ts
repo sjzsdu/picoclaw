@@ -6,6 +6,7 @@ import { type ModelInfo, getModels } from "@/api/models"
 interface UseChatModelsOptions {
   isConnected: boolean
   activeSessionId?: string
+  agentModelName?: string
 }
 
 function isLocalModel(model: ModelInfo): boolean {
@@ -22,6 +23,7 @@ function isLocalModel(model: ModelInfo): boolean {
 export function useChatModels({
   isConnected,
   activeSessionId,
+  agentModelName = "",
 }: UseChatModelsOptions) {
   const [modelList, setModelList] = useState<ModelInfo[]>([])
   const [defaultModelName, setDefaultModelName] = useState("")
@@ -35,12 +37,20 @@ export function useChatModels({
     : ""
 
   const selectedModelName = useMemo(() => {
-    const preferredModelName = sessionModelName || defaultModelName
-    if (modelList.some((model) => model.model_name === preferredModelName)) {
-      return preferredModelName
+    const availableModelNames = new Set(
+      modelList.map((model) => model.model_name),
+    )
+    for (const modelName of [
+      sessionModelName,
+      agentModelName,
+      defaultModelName,
+    ]) {
+      if (availableModelNames.has(modelName)) {
+        return modelName
+      }
     }
     return ""
-  }, [defaultModelName, modelList, sessionModelName])
+  }, [agentModelName, defaultModelName, modelList, sessionModelName])
 
   const syncDefaultModelName = useCallback(
     (models: ModelInfo[], defaultModel: string) => {
